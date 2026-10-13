@@ -841,7 +841,8 @@ else:
         html += "</tbody></table></div>"
         return html
 
-    st.markdown(f"### 📌 【{selected_store} {year}年{month}月度 - {max_day}日時点 累計サマリー】")
+    # 赤ピン削除＆店舗名・年月を省略してスッキリした見出しに変更
+    st.markdown(f"### 【{max_day}日時点 累計サマリー】")
     st.markdown(render_styled_html_table(df_summary, is_summary=True), unsafe_allow_html=True)
 
     st.markdown("---")
