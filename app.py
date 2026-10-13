@@ -189,18 +189,21 @@ def generate_month_df(selected_store, year, month, target_slot_keyword, bp_df, d
             deliv_sub = deliv_sub[deliv_sub["time_slot"] == target_slot_keyword]
         
         day_delivery_sales = 0
+        deliv_other_sales = 0
         if not deliv_sub.empty:
             day_delivery_sales = int(
                 pd.to_numeric(deliv_sub["uber"], errors="coerce").fillna(0).sum() +
                 pd.to_numeric(deliv_sub["rocket_now"], errors="coerce").fillna(0).sum() +
-                pd.to_numeric(deliv_sub["demaekan"], errors="coerce").fillna(0).sum() +
+                pd.to_numeric(deliv_sub["demaekan"], errors="coerce").fillna(0).sum()
+            )
+            deliv_other_sales = int(
                 pd.to_numeric(deliv_sub["other"], errors="coerce").fillna(0).sum()
             )
 
-        actual_sales = air_sales + day_delivery_sales + air_other_sales
+        total_other_sales = air_other_sales + deliv_other_sales
+        actual_sales = air_sales + day_delivery_sales + total_other_sales
         actual_cust = air_cust
 
-        # 小数点1桁のパーセンテージ表記
         prev_ratio = f"{(actual_sales / p_sales * 100):.1f}%" if p_sales > 0 and actual_sales != 0 else ("-" if actual_sales == 0 else "0.0%")
         budget_ratio = f"{(actual_sales / b_sales * 100):.1f}%" if b_sales > 0 and actual_sales != 0 else ("-" if actual_sales == 0 else "0.0%")
         
@@ -222,7 +225,7 @@ def generate_month_df(selected_store, year, month, target_slot_keyword, bp_df, d
             "予算比": budget_ratio,
             "店頭売上": air_sales,
             "デリバリー売上": day_delivery_sales,
-            "その他売上": air_other_sales,
+            "その他売上": total_other_sales,
             "前年客数": p_cust,
             "実績客数": actual_cust,
             "客数前年比": cust_ratio,
@@ -320,16 +323,15 @@ def create_multi_sheet_excel(selected_store, year, month, bp_df, deliv_df):
     output = io.BytesIO()
     slots = [("合計", None), ("早番", "早番"), ("中番", "中番"), ("遅番", "遅番")]
     
-    # 配色・スタイルの定義
-    header_fill = PatternFill(start_color="1F4E78", end_color="1F4E78", fill_type="solid") # 濃紺（ネイビー）
-    header_font = Font(name="游ゴシック", size=11, bold=True, color="FFFFFF")             # 白文字太字
+    header_fill = PatternFill(start_color="1F4E78", end_color="1F4E78", fill_type="solid")
+    header_font = Font(name="游ゴシック", size=11, bold=True, color="FFFFFF")
     
-    even_row_fill = PatternFill(start_color="F2F4F7", end_color="F2F4F7", fill_type="solid") # 淡いグレー（偶数行）
-    odd_row_fill = PatternFill(start_color="FFFFFF", end_color="FFFFFF", fill_type="solid")  # 白（奇数行）
+    even_row_fill = PatternFill(start_color="F2F4F7", end_color="F2F4F7", fill_type="solid")
+    odd_row_fill = PatternFill(start_color="FFFFFF", end_color="FFFFFF", fill_type="solid")
     
     data_font = Font(name="游ゴシック", size=10)
     summary_label_font = Font(name="游ゴシック", size=10, bold=True)
-    center_alignment = Alignment(horizontal="center", vertical="center")                     # 全セル中央揃え
+    center_alignment = Alignment(horizontal="center", vertical="center")
     
     thin_border = Border(
         left=Side(style="thin", color="D9D9D9"),
@@ -347,14 +349,11 @@ def create_multi_sheet_excel(selected_store, year, month, bp_df, deliv_df):
             
             ws = workbook.create_sheet(title=sheet_name)
             
-            # 1. 表の上のタイトル行（1行目）に店舗名と対象年月を配置
             title_text = f"{selected_store} {year}年{month}月度（{sheet_name}）"
             ws.cell(row=1, column=1, value=title_text)
             ws.cell(row=1, column=1).font = Font(name="游ゴシック", size=13, bold=True, color="1F4E78")
             ws.cell(row=1, column=1).alignment = Alignment(vertical="center")
             
-            # 2. サマリー表の作成（3行目〜7行目）
-            # 3行目: サマリーヘッダー
             for col_idx, col_name in enumerate(cols, start=1):
                 cell = ws.cell(row=3, column=col_idx)
                 if col_idx > 2:
@@ -364,7 +363,6 @@ def create_multi_sheet_excel(selected_store, year, month, bp_df, deliv_df):
                 cell.alignment = center_alignment
                 cell.border = thin_border
             
-            # 4行目〜7行目: サマリーデータ (合計, AVE, MIN, MAX)
             summary_rows = calculate_summary_rows(df_slot)
             for s_idx, s_row in enumerate(summary_rows, start=4):
                 fill = even_row_fill if s_idx % 2 == 0 else odd_row_fill
@@ -372,10 +370,10 @@ def create_multi_sheet_excel(selected_store, year, month, bp_df, deliv_df):
                     cell = ws.cell(row=s_idx, column=col_idx)
                     val = s_row.get(col_name, "")
                     if col_idx == 1:
-                        cell.value = val # "合計", "AVE", "MIN", "MAX"
+                        cell.value = val
                         cell.font = summary_label_font
                     elif col_idx == 2:
-                        cell.value = "" # 曜日列は空欄
+                        cell.value = ""
                     else:
                         cell.value = val
                         cell.font = data_font
@@ -384,8 +382,6 @@ def create_multi_sheet_excel(selected_store, year, month, bp_df, deliv_df):
                     cell.alignment = center_alignment
                     cell.border = thin_border
 
-            # 3. 日別実績表の作成（9行目〜）
-            # 9行目: 日別実績表ヘッダー
             for col_idx, col_name in enumerate(cols, start=1):
                 cell = ws.cell(row=9, column=col_idx, value=col_name)
                 cell.fill = header_fill
@@ -393,7 +389,6 @@ def create_multi_sheet_excel(selected_store, year, month, bp_df, deliv_df):
                 cell.alignment = center_alignment
                 cell.border = thin_border
                 
-            # 10行目〜: 日別実績データ行
             for r_idx, row_data in enumerate(df_slot.to_dict(orient="records"), start=10):
                 fill = even_row_fill if r_idx % 2 == 0 else odd_row_fill
                 for col_idx, col_name in enumerate(cols, start=1):
@@ -403,7 +398,6 @@ def create_multi_sheet_excel(selected_store, year, month, bp_df, deliv_df):
                     cell.alignment = center_alignment
                     cell.border = thin_border
 
-            # 4. 列幅の設定
             ws.column_dimensions['A'].width = 8
             ws.column_dimensions['B'].width = 8
 
@@ -412,7 +406,6 @@ def create_multi_sheet_excel(selected_store, year, month, bp_df, deliv_df):
                 col_letter = col[0].column_letter
                 ws.column_dimensions[col_letter].width = max(max_len + 4, 12)
 
-        # デフォルトで自動生成される不要な「Sheet」を削除
         if "Sheet" in workbook.sheetnames:
             workbook.remove(workbook["Sheet"])
                 
@@ -424,24 +417,29 @@ if "selected_store" not in st.session_state:
 if "selected_year_month" not in st.session_state:
     st.session_state["selected_year_month"] = "2026-10"
 
+# --- 共有日付ステートの初期化（デフォルトは当日） ---
+if "target_date_state" not in st.session_state:
+    st.session_state["target_date_state"] = datetime.now().date()
+
 # --- サイドバー設定 ---
 st.sidebar.title("メニュー")
 
 st.sidebar.markdown("---")
 st.sidebar.subheader("店舗・期間設定")
-st.session_state["selected_store"] = st.sidebar.selectbox(
+
+st.sidebar.selectbox(
     "閲覧店舗", 
     STORES, 
-    index=STORES.index(st.session_state["selected_store"])
+    key="selected_store"
 )
-st.session_state["selected_year_month"] = st.sidebar.selectbox(
+st.sidebar.selectbox(
     "対象年月", 
     ["2026-10"], 
-    index=["2026-10"].index(st.session_state["selected_year_month"])
+    key="selected_year_month"
 )
 
 with st.sidebar.expander("📥 売上データを取得する"):
-    target_date = st.date_input("取得日", value=datetime.now().date() - timedelta(days=1), key="fetch_date_input_sidebar")
+    target_date = st.date_input("取得日", value=datetime.now().date(), key="fetch_date_input_sidebar")
     if st.button("🚀 取得実行", type="primary"):
         target_str = target_date.strftime("%Y-%m-%d")
         with st.spinner(f"{target_str} 取得中..."):
@@ -484,7 +482,11 @@ if app_mode == "📱 店舗用（デリバリー入力）":
     with col_target2:
         selected_slot = st.selectbox("時間帯を選択", TIME_SLOTS)
 
-    selected_date = st.date_input("対象日付", value=datetime.now().date()).strftime("%Y-%m-%d")
+    # 共有の日付ステートと同期する対象日付入力
+    selected_date_val = st.date_input("対象日付", value=st.session_state["target_date_state"], key="deliv_date_input")
+    if selected_date_val != st.session_state["target_date_state"]:
+        st.session_state["target_date_state"] = selected_date_val
+    selected_date = selected_date_val.strftime("%Y-%m-%d")
     
     st.markdown("---")
     
@@ -499,7 +501,6 @@ if app_mode == "📱 店舗用（デリバリー入力）":
     default_other = 0
 
     if is_already_registered:
-        st.info(f"ℹ️ この日時（{selected_date} / {selected_slot}）のデータはすでに登録されています。変更して保存すると上書きされます。")
         if "uber" in existing_row.columns:
             default_uber = parse_int(existing_row["uber"].values[0])
         if "rocket_now" in existing_row.columns:
@@ -509,17 +510,41 @@ if app_mode == "📱 店舗用（デリバリー入力）":
         if "other" in existing_row.columns:
             default_other = parse_int(existing_row["other"].values[0])
 
+        st.info(f"ℹ️ この日時（{selected_date} / {selected_slot}）のデータはすでに登録されています。変更して保存すると上書きされます。")
+
+    # --- 入力ボックス内の文字スタイル設定（登録済みなら黒字太字、マイナス数値は赤字太字） ---
+    css_input_rules = []
+    if is_already_registered:
+        c_uber = "#c0392b" if default_uber < 0 else "#000000"
+        c_rn = "#c0392b" if default_rn < 0 else "#000000"
+        c_demae = "#c0392b" if default_demae < 0 else "#000000"
+        c_other = "#c0392b" if default_other < 0 else "#000000"
+
+        css_input_rules.append(f'input[aria-label="Uber Eats 売上 (円)"] {{ color: {c_uber} !important; font-weight: bold !important; font-size: 16px !important; }}')
+        css_input_rules.append(f'input[aria-label="Rocket now 売上 (円)"] {{ color: {c_rn} !important; font-weight: bold !important; font-size: 16px !important; }}')
+        css_input_rules.append(f'input[aria-label="出前館 売上 (円)"] {{ color: {c_demae} !important; font-weight: bold !important; font-size: 16px !important; }}')
+        css_input_rules.append(f'input[aria-label="その他 売上 (円)"] {{ color: {c_other} !important; font-weight: bold !important; font-size: 16px !important; }}')
+
+    if css_input_rules:
+        st.markdown("<style>" + "\n".join(css_input_rules) + "</style>", unsafe_allow_html=True)
+
+    slot_key = f"{selected_date}_{selected_store}_{selected_slot}"
+
     col_d1, col_d2 = st.columns(2)
     with col_d1:
-        uber_val = st.number_input("Uber Eats 売上 (円)", value=default_uber, step=500)
-        rn_val = st.number_input("Rocket now 売上 (円)", value=default_rn, step=500)
+        uber_val = st.number_input("Uber Eats 売上 (円)", value=default_uber, step=500, key=f"input_uber_{slot_key}")
+        rn_val = st.number_input("Rocket now 売上 (円)", value=default_rn, step=500, key=f"input_rn_{slot_key}")
     with col_d2:
-        demaekan_val = st.number_input("出前館 売上 (円)", value=default_demae, step=500)
-        other_val = st.number_input("その他 売上 (円)", value=default_other, step=500)
+        demaekan_val = st.number_input("出前館 売上 (円)", value=default_demae, step=500, key=f"input_demae_{slot_key}")
+        other_val = st.number_input("その他 売上 (円)", value=default_other, step=500, key=f"input_other_{slot_key}")
 
     st.markdown("---")
     total_delivery = uber_val + rn_val + demaekan_val + other_val
-    st.info(f"💡 この時間帯のデリバリー売上合計: **¥{total_delivery:,}**")
+    
+    if total_delivery < 0:
+        st.markdown(f"💡 この時間帯の売上合計: <span style='color: #c0392b; font-weight: bold; font-size: 1.15em;'>¥{total_delivery:,}</span>", unsafe_allow_html=True)
+    else:
+        st.markdown(f"💡 この時間帯の売上合計: **¥{total_delivery:,}**")
 
     if st.button("💾 デリバリー売上を保存する", type="primary"):
         save_delivery_data(selected_date, selected_store, selected_slot, uber_val, rn_val, demaekan_val, other_val)
@@ -530,7 +555,10 @@ elif app_mode == "📋 エクセルコピペ用データ生成":
     st.title("📋 エクセル実績入力用データ生成")
     st.markdown(f"現在選択中の店舗: **{selected_store}** | エクセルシートへ簡単にコピペするためのデータを生成します。")
 
-    target_date_val = st.date_input("対象日付", value=datetime.now().date() - timedelta(days=1), key="copy_date")
+    # 共有の日付ステートと同期する対象日付入力
+    target_date_val = st.date_input("対象日付", value=st.session_state["target_date_state"], key="copy_date_input")
+    if target_date_val != st.session_state["target_date_state"]:
+        st.session_state["target_date_state"] = target_date_val
     target_date_str = target_date_val.strftime("%Y-%m-%d")
 
     raw_df, file_status = find_and_read_airregi(target_date_str)
@@ -565,8 +593,7 @@ elif app_mode == "📋 エクセルコピペ用データ生成":
         return int(
             pd.to_numeric(sub["uber"], errors="coerce").fillna(0).sum() +
             pd.to_numeric(sub["rocket_now"], errors="coerce").fillna(0).sum() +
-            pd.to_numeric(sub["demaekan"], errors="coerce").fillna(0).sum() +
-            pd.to_numeric(sub["other"], errors="coerce").fillna(0).sum()
+            pd.to_numeric(sub["demaekan"], errors="coerce").fillna(0).sum()
         )
 
     early_d = get_slot_delivery_total(selected_store, target_date_str, "早番")
@@ -577,16 +604,24 @@ elif app_mode == "📋 エクセルコピペ用データ生成":
     mid_sales, mid_cust = get_slot_metrics(selected_store, "中番", raw_df)
     late_sales, late_cust = get_slot_metrics(selected_store, "遅番", raw_df)
 
+    # 該当日のその他売上を取得
+    bp_df_tmp = load_budget_prev_data()
+    deliv_df_tmp = load_delivery_data()
+    df_month_all = generate_month_df(selected_store, target_date_val.year, target_date_val.month, None, bp_df_tmp, deliv_df_tmp)
+    day_row = df_month_all[df_month_all["日"] == target_date_val.day]
+    target_other_sales = int(day_row["その他売上"].values[0]) if not day_row.empty else 0
+
     parts = [
         str(early_cust), str(early_sales), str(early_d),
         str(mid_cust), str(mid_sales), str(mid_d),
-        str(late_cust), str(late_sales), str(late_d)
+        str(late_cust), str(late_sales), str(late_d),
+        str(target_other_sales)
     ]
 
     tabs_list = [
         "\t" * 4, "\t" * 1, "\t" * 3,
         "\t" * 4, "\t" * 1, "\t" * 3,
-        "\t" * 4, "\t" * 1
+        "\t" * 4, "\t" * 1, "\t" * 1
     ]
     
     tsv_text = "".join([part + tabs_list[i] if i < len(tabs_list) else part for i, part in enumerate(parts)])
@@ -599,7 +634,10 @@ elif app_mode == "📄 報告書作成":
     st.markdown("指定した日付（または直近実績日まで）の全店舗の数値を集計し、LINE報告用のテキストを一括生成します。")
     st.markdown("---")
 
-    report_date = st.date_input("集計基準日（この日までを累計します）", value=datetime.now().date() - timedelta(days=1))
+    # 共有の日付ステートと同期する集計基準日入力
+    report_date = st.date_input("集計基準日（この日までを累計します）", value=st.session_state["target_date_state"], key="report_date_input")
+    if report_date != st.session_state["target_date_state"]:
+        st.session_state["target_date_state"] = report_date
     
     if st.button("📝 報告用テキストを生成する", type="primary"):
         bp_df = load_budget_prev_data()
@@ -610,7 +648,7 @@ elif app_mode == "📄 報告書作成":
 
         report_lines = [
             "お疲れ様です。",
-            "中間報告です。",
+            f"{report_date.month}月{report_date.day}日時点の中間報告です。",
             ""
         ]
 
@@ -645,15 +683,18 @@ elif app_mode == "📄 報告書作成":
 
                 deliv_sub = deliv_df[(deliv_df["date"] == date_str) & (deliv_df["store"] == store_name)]
                 day_delivery_sales = 0
+                deliv_other_sales = 0
                 if not deliv_sub.empty:
                     day_delivery_sales = int(
                         pd.to_numeric(deliv_sub["uber"], errors="coerce").fillna(0).sum() +
                         pd.to_numeric(deliv_sub["rocket_now"], errors="coerce").fillna(0).sum() +
-                        pd.to_numeric(deliv_sub["demaekan"], errors="coerce").fillna(0).sum() +
+                        pd.to_numeric(deliv_sub["demaekan"], errors="coerce").fillna(0).sum()
+                    )
+                    deliv_other_sales = int(
                         pd.to_numeric(deliv_sub["other"], errors="coerce").fillna(0).sum()
                     )
 
-                actual_sales = air_sales + day_delivery_sales + air_other_sales
+                actual_sales = air_sales + day_delivery_sales + air_other_sales + deliv_other_sales
 
                 total_p += p_sales
                 total_b += b_sales
@@ -662,7 +703,13 @@ elif app_mode == "📄 報告書作成":
             prev_ratio = f"{(total_act / total_p * 100):.1f}%" if total_p > 0 else "-"
             budget_ratio = f"{(total_act / total_b * 100):.1f}%" if total_b > 0 else "-"
             diff_budget = total_act - total_b
-            diff_str = f"+{diff_budget:,}円" if diff_budget > 0 else f"{diff_budget:,}円"
+            
+            if diff_budget > 0:
+                diff_str = f"+{diff_budget:,}円"
+            elif diff_budget < 0:
+                diff_str = f"▲{abs(diff_budget):,}円"
+            else:
+                diff_str = "0円"
 
             report_lines.append(f"【{short_label}】")
             report_lines.append(f"前年比 : {prev_ratio}")
@@ -681,18 +728,8 @@ else:
     st.subheader(f"🏬 {selected_store} {year}年{month}月度")
     st.markdown("---")
 
-    # --- メイン画面の構築 ---
-    if "active_slot_tab" not in st.session_state:
-        st.session_state["active_slot_tab"] = "合計"
-
-    slot_map_reverse = {"合計": None, "早番": "早番", "中番": "中番", "遅番": "遅番"}
-    current_keyword = slot_map_reverse[st.session_state["active_slot_tab"]]
-
     bp_df = load_budget_prev_data()
     deliv_df = load_delivery_data()
-
-    # 選択中の時間帯の月間データを生成
-    df_month = generate_month_df(selected_store, year, month, current_keyword, bp_df, deliv_df)
 
     def format_currency(val):
         if pd.isna(val):
@@ -708,14 +745,13 @@ else:
         except (ValueError, TypeError):
             return str(val)
 
-    df_month_formatted = df_month.copy()
-    for col in ["前年売上", "予算売上", "実績売上", "店頭売上", "デリバリー売上", "その他売上", "前年単価", "実績単価"]:
-        df_month_formatted[col] = df_month_formatted[col].apply(format_currency)
+    # --- 1. 累計サマリー用のデータ生成（常に店舗全体の合計：target_slot_keyword=None） ---
+    df_month_total = generate_month_df(selected_store, year, month, None, bp_df, deliv_df)
 
-    df_achieved = df_month[df_month["実績売上"] != 0]
+    df_achieved = df_month_total[df_month_total["実績売上"] != 0]
     if df_achieved.empty:
         max_day = 1
-        df_achieved = df_month.iloc[:1]
+        df_achieved = df_month_total.iloc[:1]
     else:
         max_day = int(df_achieved["日"].max())
 
@@ -736,6 +772,7 @@ else:
     cust_ratio_str = f"{(total_acust / total_pcust * 100):.1f}%" if total_pcust > 0 else "-"
     price_ratio_str = f"{(tot_aprice / tot_pprice * 100):.1f}%" if tot_pprice > 0 else "-"
 
+    # 累計サマリーデータ構築
     summary_data = [{
         "日": f"{max_day}日時点",
         "曜日": "合計",
@@ -764,75 +801,78 @@ else:
         
         html = f"""
         <div style="overflow-x: auto; margin-bottom: 20px;">
-            <table style="width: 100%; border-collapse: collapse; font-family: sans-serif; font-size: 14px; text-align: center; background-color: #ffffff;">
+            <table style="width: 100%; border-collapse: collapse; font-family: sans-serif; font-size: 14px; white-space: nowrap;">
                 <thead>
-                    <tr style="background-color: {header_bg}; color: {header_color}; border-bottom: 2px solid {border_color};">
+                    <tr style="background-color: {header_bg}; color: {header_color}; text-align: center;">
         """
         for col in df.columns:
-            html += f"<th style='padding: 10px 12px; text-align: center; border: 1px solid {border_color}; white-space: nowrap;'>{col}</th>"
+            html += f'<th style="border: 1px solid {border_color}; padding: 8px; white-space: nowrap; font-weight: bold;">{col}</th>'
         html += "</tr></thead><tbody>"
-
+        
         for idx, row in df.iterrows():
-            row_bg = "#fffdf9" if is_summary else ("#fafafa" if idx % 2 == 1 else "#ffffff")
-            font_weight = "bold" if is_summary else "normal"
-            html += f"<tr style='background-color: {row_bg}; font-weight: {font_weight};'>"
-            
+            bg_color = "#fffbf0" if is_summary else ("#fcfcfc" if idx % 2 == 0 else "#ffffff")
+            html += f'<tr style="background-color: {bg_color}; text-align: center;">'
             for col in df.columns:
-                val = row[col]
-                color = "#333333"
-                if isinstance(val, str):
-                    if "%" in val and val != "-":
-                        color = "#27ae60" if float(val.replace("%", "")) >= 100 else "#c0392b"
-                    elif "-¥" in val:
-                        color = "#c0392b"
+                val = str(row[col])
+                style = f"border: 1px solid {border_color}; padding: 8px; white-space: nowrap;"
+                
+                # --- 条件に応じた文字色と太字スタイルの判定 ---
+                if col in ["前年比", "予算比", "客数前年比", "単価前年比"] or "%" in val:
+                    if "%" in val:
+                        try:
+                            num = float(val.replace("%", "").strip())
+                            if num >= 100.0:
+                                style += " color: #27ae60; font-weight: bold;"  # 100%以上は緑文字太字
+                            else:
+                                style += " color: #c0392b; font-weight: bold;"  # 100%未満は赤文字太字
+                        except ValueError:
+                            style += " font-weight: bold;"
+                    else:
+                        style += " font-weight: bold;"
+                
+                elif "-" in val and any(char.isdigit() for char in val):
+                    style += " color: #c0392b; font-weight: bold;"  # マイナス値は赤文字太字
+                
+                elif col in ["前年売上", "予算売上", "実績売上", "店頭売上", "デリバリー売上", "その他売上", "前年単価", "実績単価"] or is_summary:
+                    style += " font-weight: bold;"
 
-                html += f"<td style='padding: 8px 12px; text-align: center; border: 1px solid {border_color}; color: {color}; white-space: nowrap;'>{val}</td>"
+                html += f'<td style="{style}">{val}</td>'
             html += "</tr>"
-
         html += "</tbody></table></div>"
         return html
 
-    # ① 累計サマリーの表示
     st.markdown(f"### 📌 【{selected_store} {year}年{month}月度 - {max_day}日時点 累計サマリー】")
     st.markdown(render_styled_html_table(df_summary, is_summary=True), unsafe_allow_html=True)
+
+    st.markdown("---")
+    st.markdown("### 🔍 表示する時間帯を選択してください")
     
+    # --- 2. 日別実績一覧用の時間帯選択タブ ---
+    if "active_slot_tab" not in st.session_state:
+        st.session_state["active_slot_tab"] = "合計"
+
+    tab_labels = ["合計", "早番", "中番", "遅番"]
+    selected_tab = st.radio("時間帯タブ", tab_labels, horizontal=True, label_visibility="collapsed")
+    st.session_state["active_slot_tab"] = selected_tab
+
+    slot_kw_map = {"合計": None, "早番": "早番", "中番": "中番", "遅番": "遅番"}
+    current_kw = slot_kw_map[selected_tab]
+    
+    # 選択した時間帯の日別一覧データを生成
+    df_current_slot = generate_month_df(selected_store, year, month, current_kw, bp_df, deliv_df)
+    df_current_slot_formatted = df_current_slot.copy()
+    for col in ["前年売上", "予算売上", "実績売上", "店頭売上", "デリバリー売上", "その他売上", "前年単価", "実績単価"]:
+        df_current_slot_formatted[col] = df_current_slot_formatted[col].apply(format_currency)
+
+    st.markdown("### 📅 日別実績一覧")
+    st.markdown(render_styled_html_table(df_current_slot_formatted), unsafe_allow_html=True)
+
     st.markdown("---")
-
-    # ② 累計サマリーと日別実績一覧の間にある切り替えスイッチ
-    st.markdown("""
-        <div style="background-color: #f1f8ff; padding: 10px 15px; border-radius: 8px; border-left: 5px solid #3498db; margin-bottom: 15px;">
-            <span style="font-weight: bold; color: #2c3e50; font-size: 16px;">🔍 表示する時間帯を選択してください</span>
-        </div>
-    """, unsafe_allow_html=True)
-
-    selected_slot_label = st.radio(
-        "表示時間帯",
-        ["合計", "早番", "中番", "遅番"],
-        horizontal=True,
-        label_visibility="collapsed",
-        key="main_slot_radio"
+    excel_data = create_multi_sheet_excel(selected_store, year, month, bp_df, deliv_df)
+    st.download_button(
+        label="📥 全時間帯タブ付きExcelをダウンロード",
+        data=excel_data,
+        file_name=f"{selected_store}_{year}年{month}月度_売上月報.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        type="primary"
     )
-
-    if selected_slot_label != st.session_state["active_slot_tab"]:
-        st.session_state["active_slot_tab"] = selected_slot_label
-        st.rerun()
-
-    st.markdown("---")
-
-    # ③ 日別実績一覧の表示
-    col_t1, col_t2 = st.columns([3, 1.2])
-    with col_t1:
-        st.markdown(f"### 📅 【{selected_store} {year}年{month}月度 日別実績一覧 ({selected_slot_label})】")
-    with col_t2:
-        # 「合計」「早番」「中番」「遅番」の全シートが入ったExcelファイルを一括生成
-        excel_bytes = create_multi_sheet_excel(selected_store, year, month, bp_df, deliv_df)
-        
-        st.download_button(
-            label="📥 Excelダウンロード（全時間帯タブ収録）",
-            data=excel_bytes,
-            file_name=f"monthly_report_{selected_store}_{selected_year_month}.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            type="primary"
-        )
-
-    st.markdown(render_styled_html_table(df_month_formatted, is_summary=False), unsafe_allow_html=True)
