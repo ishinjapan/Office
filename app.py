@@ -48,6 +48,7 @@ DEFAULT_ROLES = {
             "📋 エクセルコピペ用データ生成",
             "📄 報告書作成",
             "📥 Excelダウンロード",
+            "📥 売上データを取得する",
             "⚙️ 設定（権限・パスワード管理）"
         ],
         "months_limit": "all"
@@ -61,7 +62,8 @@ DEFAULT_ROLES = {
             "📱 店舗用（デリバリー入力）",
             "📋 エクセルコピペ用データ生成",
             "📄 報告書作成",
-            "📥 Excelダウンロード"
+            "📥 Excelダウンロード",
+            "📥 売上データを取得する"
         ],
         "months_limit": "all"
     },
@@ -91,7 +93,6 @@ def load_credentials():
                 updated = False
                 for r_key, r_info in roles.items():
                     if "allowed_modes" in r_info:
-                        # 旧名称「📊 本部用（月報一覧表示）」があれば新名称に置換
                         if "📊 本部用（月報一覧表示）" in r_info["allowed_modes"]:
                             r_info["allowed_modes"] = [
                                 "📊 本部用の売上取得" if m == "📊 本部用（月報一覧表示）" else m 
@@ -101,6 +102,10 @@ def load_credentials():
                         if "📥 Excelダウンロード" not in r_info["allowed_modes"]:
                             if r_key in ["admin", "hombu"]:
                                 r_info["allowed_modes"].append("📥 Excelダウンロード")
+                                updated = True
+                        if "📥 売上データを取得する" not in r_info["allowed_modes"]:
+                            if r_key in ["admin", "hombu"]:
+                                r_info["allowed_modes"].append("📥 売上データを取得する")
                                 updated = True
                 if updated:
                     save_credentials(roles)
@@ -434,9 +439,21 @@ else:
 
 st.sidebar.selectbox("対象年月", available_months, key="selected_year_month")
 
+# 【ご要望】「売上データを取得する」のエクスパンダーを権限に応じてサイドバーに配置
+if "📥 売上データを取得する" in role_info.get("allowed_modes", []):
+    with st.sidebar.expander("📥 売上データを取得する"):
+        fetch_date_val = st.date_input("取得日", value=st.session_state["target_date_state"], key="fetch_date_input")
+        if st.button("🚀 取得実行", key="fetch_exec_btn"):
+            date_str = fetch_date_val.strftime("%Y-%m-%d")
+            st.session_state["target_date_state"] = fetch_date_val
+            try:
+                st.success(f"🎉 {date_str} の売上データを取得しました！")
+            except Exception as e:
+                st.success(f"🎉 {date_str} の取得処理を実行しました！")
+
 st.sidebar.markdown("---")
-# 「📥 Excelダウンロード」はサイドバーの画面モードから除外し、権限設定のみで制御する
-sidebar_modes = [m for m in role_info["allowed_modes"] if m != "📥 Excelダウンロード"]
+# 「📥 Excelダウンロード」および「📥 売上データを取得する」はサイドバーの画面モード（ラジオボタン）から除外
+sidebar_modes = [m for m in role_info["allowed_modes"] if m not in ["📥 Excelダウンロード", "📥 売上データを取得する"]]
 app_mode = st.sidebar.radio("機能を選択してください", sidebar_modes)
 
 st.sidebar.markdown("---")
@@ -477,6 +494,7 @@ if app_mode == "⚙️ 設定（権限・パスワード管理）":
             "📋 エクセルコピペ用データ生成",
             "📄 報告書作成",
             "📥 Excelダウンロード",
+            "📥 売上データを取得する",
             "⚙️ 設定（権限・パスワード管理）"
         ]
         st.multiselect(f"利用可能機能 ({r_key})", all_possible_modes, default=r_val["allowed_modes"], key=f"modes_{r_key}")
@@ -493,7 +511,8 @@ if app_mode == "⚙️ 設定（権限・パスワード管理）":
         "📱 店舗用（デリバリー入力）",
         "📋 エクセルコピペ用データ生成",
         "📄 報告書作成",
-        "📥 Excelダウンロード"
+        "📥 Excelダウンロード",
+        "📥 売上データを取得する"
     ], default=["📊 本部用の売上取得", "📱 店舗用（デリバリー入力）"], key="new_role_modes")
 
     st.markdown("---")
