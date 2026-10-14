@@ -63,8 +63,8 @@ DEFAULT_ROLES = {
         ],
         "months_limit": "all"
     },
-    "mita_staff": {
-        "name": "三田店スタッフ",
+    "mita_tenpo": {
+        "name": "三田店店舗",
         "password": "mita123",
         "store": "三田おにぎり 本店",
         "allowed_modes": [
@@ -392,22 +392,18 @@ else:
     st.sidebar.info(f"📍 担当店舗: {assigned_store} （固定）")
 
 # 閲覧可能月（months_limit）の制限ロジック
-# 例: "all" なら全期間（ここでは固定で2026-10など）、数値 N なら当月から過去Nヶ月分を生成
 months_limit = role_info.get("months_limit", "all")
 if months_limit == "all":
-    available_months = ["2026-10", "2026-09", "2026-08", "2026-07"] # 必要に応じて拡張可能
+    available_months = ["2026-10", "2026-09", "2026-08", "2026-07"]
 else:
-    # 過去 N ヶ月分の年月リストを生成
     try:
         limit_n = int(months_limit)
     except:
         limit_n = 3
     
-    current_dt = datetime(2026, 10, 1) # 現在の基準月（必要に応じて datetime.now() に変更可能）
+    current_dt = datetime(2026, 10, 1)
     available_months = []
     for i in range(limit_n):
-        m_dt = current_dt - timedelta(days=30*i)
-        # 簡易的に月を巻き戻す
         y = current_dt.year
         m = current_dt.month - i
         while m <= 0:
@@ -416,9 +412,6 @@ else:
         available_months.append(f"{y:04d}-{m:02d}")
 
 st.sidebar.selectbox("対象年月", available_months, key="selected_year_month")
-
-if "売上データを取得する" in str(role_info["allowed_modes"]) and not is_all_stores: # 必要に応じたデータ取得権限
-    pass
 
 st.sidebar.markdown("---")
 app_mode = st.sidebar.radio("機能を選択してください", role_info["allowed_modes"])
@@ -453,15 +446,12 @@ if app_mode == "⚙️ 設定（権限・パスワード管理）":
             with col_r2:
                 r_pass = st.text_input(f"パスワード ({r_key})", value=r_val["password"], type="password", key=f"pass_{r_key}")
             with col_r3:
-                # 閲覧可能月制限
                 limit_val = r_val.get("months_limit", "all")
                 limit_str = str(limit_val)
                 r_limit = st.text_input(f"閲覧可能月 ('all' または 数字)", value=limit_str, key=f"limit_{r_key}")
             
-            # 店舗スコープ
             r_store = st.selectbox(f"担当店舗 ({r_key})", ["すべて（切替可能）"] + STORES, index=0 if r_val["store"]=="すべて（切替可能）" else STORES.index(r_val["store"])+1, key=f"store_{r_key}")
 
-            # 利用可能機能の選択
             all_possible_modes = [
                 "📊 本部用（月報一覧表示）",
                 "📱 店舗用（デリバリー入力）",
@@ -481,8 +471,8 @@ if app_mode == "⚙️ 設定（権限・パスワード管理）":
             st.markdown("---")
 
         st.subheader("➕ 新しい権限を追加する")
-        new_key = st.text_input("新規権限キー (例: shinjuku_staff ※半角英数字)")
-        new_name = st.text_input("新規権限表示名 (例: 新宿店スタッフ)")
+        new_key = st.text_input("新規権限キー (例: ebisu_tenpo ※半角英数字)")
+        new_name = st.text_input("新規権限表示名 (例: 恵比寿店店舗)")
         new_pass = st.text_input("新規パスワード", type="password")
         new_store = st.selectbox("新規担当店舗", ["すべて（切替可能）"] + STORES)
         new_limit = st.text_input("閲覧可能月 ('all' または 数字)", value="3")
@@ -665,7 +655,7 @@ elif app_mode == "📄 報告書作成":
             diff_budget = total_act - total_b
             diff_str = f"+{diff_budget:,}円" if diff_budget > 0 else (f"▲{abs(diff_budget):,}円" if diff_budget < 0 else "0円")
 
-            short_label = STORE_CREDENTIALS[store_name]["short_label"] if 'STORE_CREDENTIALS' in globals() else store_name[:2] + "店"
+            short_label = get_short_store_key(store_name) + "店"
             report_lines.extend([f"【{short_label}】", f"前年比 : {prev_ratio}", f"予算比 : {budget_ratio}", f"累売上 : {total_act:,}円", f"予乖離 : {diff_str}", ""])
 
         st.success("🎉 報告用テキストを生成しました！以下の枠内をコピーしてLINEに貼り付けてください。")
