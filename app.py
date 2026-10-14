@@ -8,6 +8,7 @@ import glob
 import subprocess
 import io
 import json
+import sys
 
 # openpyxlのスタイリング設定用モジュール
 from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
@@ -448,7 +449,7 @@ if "📥 売上データを取得する" in role_info.get("allowed_modes", []):
             with st.spinner(f"{target_str} 取得中..."):
                 try:
                     result = subprocess.run(
-                        ["python", "get_monthly_data.py", target_str, target_str],
+                        [sys.executable, "get_monthly_data.py", target_str, target_str],
                         capture_output=True,
                         text=True,
                         encoding="utf-8",
