@@ -479,7 +479,6 @@ if app_mode == "⚙️ 設定（権限・パスワード管理）":
     # 確定・保存ボタン
     if st.button("💾 設定を保存する", type="primary"):
         updated_roles = {}
-        # st.session_state から最新の入力・選択状態を確実に取得して組み立てる
         for r_key, r_val in ROLES.items():
             r_name = st.session_state.get(f"name_{r_key}", r_val["name"])
             r_pass = st.session_state.get(f"pass_{r_key}", r_val["password"])
@@ -495,7 +494,6 @@ if app_mode == "⚙️ 設定（権限・パスワード管理）":
                 "months_limit": int(r_limit) if str(r_limit).isdigit() else "all"
             }
 
-        # 新規追加分の反映
         new_key = st.session_state.get("new_role_key", "").strip()
         if new_key and new_key not in updated_roles:
             new_name = st.session_state.get("new_role_name", new_key)
@@ -768,13 +766,17 @@ else:
         if col in df_current_slot_formatted.columns:
             df_current_slot_formatted[col] = df_current_slot_formatted[col].apply(format_currency)
 
-    st.markdown("### 📅 日別実績一覧")
-    st.markdown(render_styled_html_table(df_current_slot_formatted), unsafe_allow_html=True)
+    # 「日別実績一覧」の見出しとExcelダウンロードボタンを横並びに配置
+    col_h1, col_h2 = st.columns([2.5, 1.5])
+    with col_h1:
+        st.markdown("### 📅 日別実績一覧")
+    with col_h2:
+        excel_data = create_multi_sheet_excel(selected_store, year, month, bp_df, deliv_df)
+        st.download_button(
+            label="📥 全時間帯タブ付きExcelをダウンロード", data=excel_data,
+            file_name=f"{selected_store}_{year}年月度_売上月報.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", type="primary",
+            use_container_width=True
+        )
 
-    st.markdown("---")
-    excel_data = create_multi_sheet_excel(selected_store, year, month, bp_df, deliv_df)
-    st.download_button(
-        label="📥 全時間帯タブ付きExcelをダウンロード", data=excel_data,
-        file_name=f"{selected_store}_{year}年月度_売上月報.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", type="primary"
-    )
+    st.markdown(render_styled_html_table(df_current_slot_formatted), unsafe_allow_html=True)
