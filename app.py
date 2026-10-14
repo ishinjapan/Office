@@ -87,6 +87,17 @@ def load_credentials():
                 if "mita_staff" in roles and "mita_tenpo" not in roles:
                     roles["mita_tenpo"] = roles.pop("mita_staff")
                     save_credentials(roles)
+                
+                # 「📥 Excelダウンロード」が未登録のロールに自動追加するマイグレーション
+                updated = False
+                for r_key, r_info in roles.items():
+                    if "allowed_modes" in r_info and "📥 Excelダウンロード" not in r_info["allowed_modes"]:
+                        if r_key in ["admin", "hombu"]:
+                            r_info["allowed_modes"].append("📥 Excelダウンロード")
+                            updated = True
+                if updated:
+                    save_credentials(roles)
+
                 return roles
         except Exception:
             pass
