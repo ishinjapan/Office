@@ -383,7 +383,6 @@ if not is_all_stores:
 
 # --- サイドバー設定 ---
 st.sidebar.title("メニュー")
-# ※ 権限の表示部分を削除しました
 if not is_all_stores:
     st.sidebar.markdown(f"🏬 担当店舗: **{assigned_store}**")
 
@@ -493,8 +492,6 @@ if app_mode == "⚙️ 設定（権限・パスワード管理）":
                 "months_limit": int(new_limit) if new_limit.isdigit() else "all"
             }
         save_credentials(updated_roles)
-        global ROLES
-        ROLES = updated_roles
         st.success("🎉 権限設定を保存しました！変更が即時反映されました。")
         st.rerun()
 
