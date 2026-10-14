@@ -75,13 +75,18 @@ DEFAULT_ROLES = {
     }
 }
 
-# 認証情報の読み込み・保存関数
+# 認証情報の読み込み・保存関数（自動マイグレーション付き）
 def load_credentials():
     if os.path.exists(CREDENTIALS_PATH):
         try:
             with open(CREDENTIALS_PATH, "r", encoding="utf-8") as f:
                 data = json.load(f)
-                return data.get("roles", DEFAULT_ROLES)
+                roles = data.get("roles", DEFAULT_ROLES)
+                # 旧キー "mita_staff" が存在する場合は自動的に "mita_tenpo" に移行する
+                if "mita_staff" in roles and "mita_tenpo" not in roles:
+                    roles["mita_tenpo"] = roles.pop("mita_staff")
+                    save_credentials(roles)
+                return roles
         except Exception:
             pass
     return DEFAULT_ROLES
