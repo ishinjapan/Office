@@ -439,15 +439,15 @@ else:
 
 st.sidebar.selectbox("対象年月", available_months, key="selected_year_month")
 
-# 【ご要望】権限がある場合のみ表示する「売上データを取得する」のエクスパンダー（Airレジ抽出スクリプト連携）
+# 権限がある場合のみ表示する「売上データを取得する」のエクスパンダー（当日をデフォルトに設定）
 if "📥 売上データを取得する" in role_info.get("allowed_modes", []):
     with st.sidebar.expander("📥 売上データを取得する"):
-        target_date = st.date_input("取得日", value=datetime.now().date() - timedelta(days=1), key="fetch_date_input_sidebar")
+        target_date = st.date_input("取得日", value=datetime.now().date(), key="fetch_date_input_sidebar")
         if st.button("🚀 取得実行", type="primary"):
             target_str = target_date.strftime("%Y-%m-%d")
             with st.spinner(f"{target_str} 取得中..."):
                 try:
-                    subprocess.run(
+                    result = subprocess.run(
                         ["python", "get_monthly_data.py", target_str, target_str],
                         capture_output=True,
                         text=True,
@@ -458,7 +458,8 @@ if "📥 売上データを取得する" in role_info.get("allowed_modes", []):
                     st.success("🎉 取得完了！")
                     st.rerun()
                 except subprocess.CalledProcessError as e:
-                    st.error(f"❌ エラー:\n{e}")
+                    error_msg = e.stderr if e.stderr else str(e)
+                    st.error(f"❌ エラーが発生しました:\n{error_msg}")
 
 st.sidebar.markdown("---")
 # 「📥 Excelダウンロード」および「📥 売上データを取得する」はサイドバーの画面モード（ラジオボタン）から除外
