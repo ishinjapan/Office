@@ -88,7 +88,6 @@ def load_credentials():
                     roles["mita_tenpo"] = roles.pop("mita_staff")
                     save_credentials(roles)
                 
-                # 「📥 Excelダウンロード」が未登録のロールに自動追加するマイグレーション
                 updated = False
                 for r_key, r_info in roles.items():
                     if "allowed_modes" in r_info and "📥 Excelダウンロード" not in r_info["allowed_modes"]:
@@ -430,7 +429,9 @@ else:
 st.sidebar.selectbox("対象年月", available_months, key="selected_year_month")
 
 st.sidebar.markdown("---")
-app_mode = st.sidebar.radio("機能を選択してください", role_info["allowed_modes"])
+# 「📥 Excelダウンロード」はサイドバーの画面モード（ラジオボタン）から除外し、権限設定のみで制御する
+sidebar_modes = [m for m in role_info["allowed_modes"] if m != "📥 Excelダウンロード"]
+app_mode = st.sidebar.radio("機能を選択してください", sidebar_modes)
 
 st.sidebar.markdown("---")
 if st.sidebar.button("🚪 ログアウト"):
@@ -781,8 +782,8 @@ else:
         if col in df_current_slot_formatted.columns:
             df_current_slot_formatted[col] = df_current_slot_formatted[col].apply(format_currency)
 
-    # 「日別実績一覧」の見出しとEXCELダウンロードボタンを横並びに配置（ボタン幅・文字を完全に収めるように比率調整）
-    col_h1, col_h2 = st.columns([1.6, 2.4])
+    # 「日別実績一覧」の見出しと、コンパクトなEXCELダウンロードボタンを横並びに配置
+    col_h1, col_h2 = st.columns([3.2, 0.8])
     with col_h1:
         st.markdown("### 📅 日別実績一覧")
     with col_h2:
@@ -791,8 +792,8 @@ else:
             st.download_button(
                 label="📥 Excelダウンロード", data=excel_data,
                 file_name=f"{selected_store}_{year}年月度_売上月報.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", type="primary",
-                use_container_width=True
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", type="primary"
+                # use_container_width=True を削除してコンパクトなボタンサイズに戻しました
             )
 
     st.markdown(render_styled_html_table(df_current_slot_formatted), unsafe_allow_html=True)
