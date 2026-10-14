@@ -434,22 +434,22 @@ year, month = map(int, selected_year_month.split("-"))
 # ==========================================
 if app_mode == "⚙️ 設定（権限・パスワード管理）":
     st.title("⚙️ 権限・パスワード・閲覧月管理")
-    st.markdown("権限（ロール）ごとのパスワード、利用可能機能、月報の閲覧可能月数を自由に追加・編集できます。")
+    st.markdown("権限（ロール）ごとのパスワード、利用可能機能、月報の閲覧可能月数を自由に追加・編集できます。変更後は下の「設定を保存する」ボタンを押してください。")
     st.markdown("---")
 
-    updated_roles = {}
+    # 各設定用のウィジェット配置
     for r_key, r_val in ROLES.items():
         st.markdown(f"**権限キー (ID): `{r_key}`**")
         col_r1, col_r2, col_r3 = st.columns(3)
         with col_r1:
-            r_name = st.text_input(f"表示名 ({r_key})", value=r_val["name"], key=f"name_{r_key}")
+            st.text_input(f"表示名 ({r_key})", value=r_val["name"], key=f"name_{r_key}")
         with col_r2:
-            r_pass = st.text_input(f"パスワード ({r_key})", value=r_val["password"], type="password", key=f"pass_{r_key}")
+            st.text_input(f"パスワード ({r_key})", value=r_val["password"], type="password", key=f"pass_{r_key}")
         with col_r3:
             limit_val = r_val.get("months_limit", "all")
-            r_limit = st.text_input(f"閲覧可能月 ('all' または 数字)", value=str(limit_val), key=f"limit_{r_key}")
+            st.text_input(f"閲覧可能月 ('all' または 数字)", value=str(limit_val), key=f"limit_{r_key}")
         
-        r_store = st.selectbox(f"担当店舗 ({r_key})", ["すべて（切替可能）"] + STORES, index=0 if r_val["store"]=="すべて（切替可能）" else STORES.index(r_val["store"])+1, key=f"store_{r_key}")
+        st.selectbox(f"担当店舗 ({r_key})", ["すべて（切替可能）"] + STORES, index=0 if r_val["store"]=="すべて（切替可能）" else STORES.index(r_val["store"])+1, key=f"store_{r_key}")
 
         all_possible_modes = [
             "📊 本部用（月報一覧表示）",
@@ -458,41 +458,64 @@ if app_mode == "⚙️ 設定（権限・パスワード管理）":
             "📄 報告書作成",
             "⚙️ 設定（権限・パスワード管理）"
         ]
-        r_modes = st.multiselect(f"利用可能機能 ({r_key})", all_possible_modes, default=r_val["allowed_modes"], key=f"modes_{r_key}")
-        
-        updated_roles[r_key] = {
-            "name": r_name,
-            "password": r_pass,
-            "store": r_store,
-            "allowed_modes": r_modes,
-            "months_limit": int(r_limit) if r_limit.isdigit() else "all"
-        }
+        st.multiselect(f"利用可能機能 ({r_key})", all_possible_modes, default=r_val["allowed_modes"], key=f"modes_{r_key}")
         st.markdown("---")
 
     st.subheader("➕ 新しい権限を追加する")
-    new_key = st.text_input("新規権限キー (例: ebisu_tenpo ※半角英数字)", key="new_role_key")
-    new_name = st.text_input("新規権限表示名 (例: 恵比寿店店舗)", key="new_role_name")
-    new_pass = st.text_input("新規パスワード", type="password", key="new_role_pass")
-    new_store = st.selectbox("新規担当店舗", ["すべて（切替可能）"] + STORES, key="new_role_store")
-    new_limit = st.text_input("閲覧可能月 ('all' または 数字)", value="3", key="new_role_limit")
-    new_modes = st.multiselect("新規利用可能機能", [
+    st.text_input("新規権限キー (例: ebisu_tenpo ※半角英数字)", key="new_role_key")
+    st.text_input("新規権限表示名 (例: 恵比寿店店舗)", key="new_role_name")
+    st.text_input("新規パスワード", type="password", key="new_role_pass")
+    st.selectbox("新規担当店舗", ["すべて（切替可能）"] + STORES, key="new_role_store")
+    st.text_input("閲覧可能月 ('all' または 数字)", value="3", key="new_role_limit")
+    st.multiselect("新規利用可能機能", [
         "📊 本部用（月報一覧表示）",
         "📱 店舗用（デリバリー入力）",
         "📋 エクセルコピペ用データ生成",
         "📄 報告書作成"
     ], default=["📊 本部用（月報一覧表示）", "📱 店舗用（デリバリー入力）"], key="new_role_modes")
 
+    st.markdown("---")
+    
+    # 確定・保存ボタン
     if st.button("💾 設定を保存する", type="primary"):
+        updated_roles = {}
+        # st.session_state から最新の入力・選択状態を確実に取得して組み立てる
+        for r_key, r_val in ROLES.items():
+            r_name = st.session_state.get(f"name_{r_key}", r_val["name"])
+            r_pass = st.session_state.get(f"pass_{r_key}", r_val["password"])
+            r_limit = st.session_state.get(f"limit_{r_key}", str(r_val.get("months_limit", "all")))
+            r_store = st.session_state.get(f"store_{r_key}", r_val["store"])
+            r_modes = st.session_state.get(f"modes_{r_key}", r_val["allowed_modes"])
+
+            updated_roles[r_key] = {
+                "name": r_name,
+                "password": r_pass,
+                "store": r_store,
+                "allowed_modes": r_modes,
+                "months_limit": int(r_limit) if str(r_limit).isdigit() else "all"
+            }
+
+        # 新規追加分の反映
+        new_key = st.session_state.get("new_role_key", "").strip()
         if new_key and new_key not in updated_roles:
+            new_name = st.session_state.get("new_role_name", new_key)
+            new_pass = st.session_state.get("new_role_pass", "1234")
+            new_store = st.session_state.get("new_role_store", STORES[0])
+            new_limit = st.session_state.get("new_role_limit", "3")
+            new_modes = st.session_state.get("new_role_modes", [])
+            
             updated_roles[new_key] = {
-                "name": new_name or new_key,
-                "password": new_pass or "1234",
+                "name": new_name,
+                "password": new_pass,
                 "store": new_store,
                 "allowed_modes": new_modes,
-                "months_limit": int(new_limit) if new_limit.isdigit() else "all"
+                "months_limit": int(new_limit) if str(new_limit).isdigit() else "all"
             }
+
         save_credentials(updated_roles)
-        st.success("🎉 権限設定を保存しました！変更が即時反映されました。")
+        global ROLES
+        ROLES = load_credentials()
+        st.success("🎉 権限設定を保存しました！削除や変更内容が正常に反映されました。")
         st.rerun()
 
 elif app_mode == "📱 店舗用（デリバリー入力）":
@@ -742,8 +765,9 @@ else:
     slot_kw_map = {"合計": None, "早番": "早番", "中番": "中番", "遅番": "遅番"}
     df_current_slot = generate_month_df(selected_store, year, month, slot_kw_map[selected_tab], bp_df, deliv_df)
     df_current_slot_formatted = df_current_slot.copy()
-    for col in ["前年売上", "予算売上", "実績売上", "店頭売上", "デリバリー売上", "その他売上", "前年単価", "実績単価"]:
-        df_current_slot_formatted[col] = df_current_slot_formatted[col].apply(format_currency)
+    for col in ["前Year売上", "予算売上", "実績売上", "店頭売上", "デリバリー売上", "その他売上", "前年単価", "実績単価"]:
+        if col in df_current_slot_formatted.columns:
+            df_current_slot_formatted[col] = df_current_slot_formatted[col].apply(format_currency)
 
     st.markdown("### 📅 日別実績一覧")
     st.markdown(render_styled_html_table(df_current_slot_formatted), unsafe_allow_html=True)
