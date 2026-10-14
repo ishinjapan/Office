@@ -513,7 +513,6 @@ if app_mode == "⚙️ 設定（権限・パスワード管理）":
             }
 
         save_credentials(updated_roles)
-        global ROLES
         ROLES = load_credentials()
         st.success("🎉 権限設定を保存しました！削除や変更内容が正常に反映されました。")
         st.rerun()
@@ -765,7 +764,7 @@ else:
     slot_kw_map = {"合計": None, "早番": "早番", "中番": "中番", "遅番": "遅番"}
     df_current_slot = generate_month_df(selected_store, year, month, slot_kw_map[selected_tab], bp_df, deliv_df)
     df_current_slot_formatted = df_current_slot.copy()
-    for col in ["前Year売上", "予算売上", "実績売上", "店頭売上", "デリバリー売上", "その他売上", "前年単価", "実績単価"]:
+    for col in ["前年売上", "予算売上", "実績売上", "店頭売上", "デリバリー売上", "その他売上", "前年単価", "実績単価"]:
         if col in df_current_slot_formatted.columns:
             df_current_slot_formatted[col] = df_current_slot_formatted[col].apply(format_currency)
 
