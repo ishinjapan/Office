@@ -766,14 +766,14 @@ else:
         if col in df_current_slot_formatted.columns:
             df_current_slot_formatted[col] = df_current_slot_formatted[col].apply(format_currency)
 
-    # 「日別実績一覧」の見出しとExcelダウンロードボタンを横並びに配置
-    col_h1, col_h2 = st.columns([2.5, 1.5])
+    # 「日別実績一覧」の見出しとEXCELダウンロードボタンを横並びに配置（ボタン幅・文字を最適化）
+    col_h1, col_h2 = st.columns([3.2, 0.8])
     with col_h1:
         st.markdown("### 📅 日別実績一覧")
     with col_h2:
         excel_data = create_multi_sheet_excel(selected_store, year, month, bp_df, deliv_df)
         st.download_button(
-            label="📥 全時間帯タブ付きExcelをダウンロード", data=excel_data,
+            label="📥 EXCELをダウンロード", data=excel_data,
             file_name=f"{selected_store}_{year}年月度_売上月報.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", type="primary",
             use_container_width=True
