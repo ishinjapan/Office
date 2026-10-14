@@ -43,7 +43,7 @@ DEFAULT_ROLES = {
         "password": "admin123",
         "store": "すべて（切替可能）",
         "allowed_modes": [
-            "📊 本部用（月報一覧表示）",
+            "📊 本部用の売上取得",
             "📱 店舗用（デリバリー入力）",
             "📋 エクセルコピペ用データ生成",
             "📄 報告書作成",
@@ -57,7 +57,7 @@ DEFAULT_ROLES = {
         "password": "hombu123",
         "store": "すべて（切替可能）",
         "allowed_modes": [
-            "📊 本部用（月報一覧表示）",
+            "📊 本部用の売上取得",
             "📱 店舗用（デリバリー入力）",
             "📋 エクセルコピペ用データ生成",
             "📄 報告書作成",
@@ -70,7 +70,7 @@ DEFAULT_ROLES = {
         "password": "mita123",
         "store": "三田おにぎり 本店",
         "allowed_modes": [
-            "📊 本部用（月報一覧表示）",
+            "📊 本部用の売上取得",
             "📱 店舗用（デリバリー入力）"
         ],
         "months_limit": 3
@@ -90,10 +90,18 @@ def load_credentials():
                 
                 updated = False
                 for r_key, r_info in roles.items():
-                    if "allowed_modes" in r_info and "📥 Excelダウンロード" not in r_info["allowed_modes"]:
-                        if r_key in ["admin", "hombu"]:
-                            r_info["allowed_modes"].append("📥 Excelダウンロード")
+                    if "allowed_modes" in r_info:
+                        # 旧名称「📊 本部用（月報一覧表示）」があれば新名称に置換
+                        if "📊 本部用（月報一覧表示）" in r_info["allowed_modes"]:
+                            r_info["allowed_modes"] = [
+                                "📊 本部用の売上取得" if m == "📊 本部用（月報一覧表示）" else m 
+                                for m in r_info["allowed_modes"]
+                            ]
                             updated = True
+                        if "📥 Excelダウンロード" not in r_info["allowed_modes"]:
+                            if r_key in ["admin", "hombu"]:
+                                r_info["allowed_modes"].append("📥 Excelダウンロード")
+                                updated = True
                 if updated:
                     save_credentials(roles)
 
@@ -403,7 +411,6 @@ st.sidebar.subheader("店舗・期間設定")
 
 if is_all_stores:
     st.sidebar.selectbox("閲覧店舗", STORES, key="selected_store")
-# 固定店舗の場合の st.sidebar.info 表示ブロックを削除して間をつめました
 
 # 閲覧可能月（months_limit）の制限ロジック
 months_limit = role_info.get("months_limit", "all")
@@ -428,7 +435,7 @@ else:
 st.sidebar.selectbox("対象年月", available_months, key="selected_year_month")
 
 st.sidebar.markdown("---")
-# 「📥 Excelダウンロード」はサイドバーの画面モード（ラジオボタン）から除外し、権限設定のみで制御する
+# 「📥 Excelダウンロード」はサイドバーの画面モードから除外し、権限設定のみで制御する
 sidebar_modes = [m for m in role_info["allowed_modes"] if m != "📥 Excelダウンロード"]
 app_mode = st.sidebar.radio("機能を選択してください", sidebar_modes)
 
@@ -447,7 +454,7 @@ year, month = map(int, selected_year_month.split("-"))
 # ==========================================
 if app_mode == "⚙️ 設定（権限・パスワード管理）":
     st.title("⚙️ 権限・パスワード・閲覧月管理")
-    st.markdown("権限（ロール）ごとのパスワード、利用可能機能、月報の閲覧可能月数を自由に追加・編集できます。変更後は下の公式「設定を保存する」ボタンを押してください。")
+    st.markdown("権限（ロール）ごとのパスワード、利用可能機能、月報の閲覧可能月数を自由に追加・編集できます。変更後は下の「設定を保存する」ボタンを押してください。")
     st.markdown("---")
 
     # 各設定用のウィジェット配置
@@ -465,7 +472,7 @@ if app_mode == "⚙️ 設定（権限・パスワード管理）":
         st.selectbox(f"担当店舗 ({r_key})", ["すべて（切替可能）"] + STORES, index=0 if r_val["store"]=="すべて（切替可能）" else STORES.index(r_val["store"])+1, key=f"store_{r_key}")
 
         all_possible_modes = [
-            "📊 本部用（月報一覧表示）",
+            "📊 本部用の売上取得",
             "📱 店舗用（デリバリー入力）",
             "📋 エクセルコピペ用データ生成",
             "📄 報告書作成",
@@ -482,12 +489,12 @@ if app_mode == "⚙️ 設定（権限・パスワード管理）":
     st.selectbox("新規担当店舗", ["すべて（切替可能）"] + STORES, key="new_role_store")
     st.text_input("閲覧可能月 ('all' または 数字)", value="3", key="new_role_limit")
     st.multiselect("新規利用可能機能", [
-        "📊 本部用（月報一覧表示）",
+        "📊 本部用の売上取得",
         "📱 店舗用（デリバリー入力）",
         "📋 エクセルコピペ用データ生成",
         "📄 報告書作成",
         "📥 Excelダウンロード"
-    ], default=["📊 本部用（月報一覧表示）", "📱 店舗用（デリバリー入力）"], key="new_role_modes")
+    ], default=["📊 本部用の売上取得", "📱 店舗用（デリバリー入力）"], key="new_role_modes")
 
     st.markdown("---")
     
@@ -695,6 +702,7 @@ elif app_mode == "📄 報告書作成":
         st.code("\n".join(report_lines).strip(), language="text")
 
 else:
+    # app_mode == "📊 本部用の売上取得" の場合の画面
     st.title("📊 売上月報一覧")
     st.subheader(f"🏬 {selected_store} {year}年{month}月度")
     st.markdown("---")
