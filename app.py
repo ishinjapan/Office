@@ -47,6 +47,7 @@ DEFAULT_ROLES = {
             "📱 店舗用（デリバリー入力）",
             "📋 エクセルコピペ用データ生成",
             "📄 報告書作成",
+            "📥 Excelダウンロード",
             "⚙️ 設定（権限・パスワード管理）"
         ],
         "months_limit": "all"
@@ -59,7 +60,8 @@ DEFAULT_ROLES = {
             "📊 本部用（月報一覧表示）",
             "📱 店舗用（デリバリー入力）",
             "📋 エクセルコピペ用データ生成",
-            "📄 報告書作成"
+            "📄 報告書作成",
+            "📥 Excelダウンロード"
         ],
         "months_limit": "all"
     },
@@ -456,6 +458,7 @@ if app_mode == "⚙️ 設定（権限・パスワード管理）":
             "📱 店舗用（デリバリー入力）",
             "📋 エクセルコピペ用データ生成",
             "📄 報告書作成",
+            "📥 Excelダウンロード",
             "⚙️ 設定（権限・パスワード管理）"
         ]
         st.multiselect(f"利用可能機能 ({r_key})", all_possible_modes, default=r_val["allowed_modes"], key=f"modes_{r_key}")
@@ -471,7 +474,8 @@ if app_mode == "⚙️ 設定（権限・パスワード管理）":
         "📊 本部用（月報一覧表示）",
         "📱 店舗用（デリバリー入力）",
         "📋 エクセルコピペ用データ生成",
-        "📄 報告書作成"
+        "📄 報告書作成",
+        "📥 Excelダウンロード"
     ], default=["📊 本部用（月報一覧表示）", "📱 店舗用（デリバリー入力）"], key="new_role_modes")
 
     st.markdown("---")
@@ -766,17 +770,18 @@ else:
         if col in df_current_slot_formatted.columns:
             df_current_slot_formatted[col] = df_current_slot_formatted[col].apply(format_currency)
 
-    # 「日別実績一覧」の見出しとEXCELダウンロードボタンを横並びに配置（ボタン幅・文字を最適化）
-    col_h1, col_h2 = st.columns([3.2, 0.8])
+    # 「日別実績一覧」の見出しとEXCELダウンロードボタンを横並びに配置（ボタン幅・文字を完全に収めるように比率調整）
+    col_h1, col_h2 = st.columns([1.6, 2.4])
     with col_h1:
         st.markdown("### 📅 日別実績一覧")
     with col_h2:
-        excel_data = create_multi_sheet_excel(selected_store, year, month, bp_df, deliv_df)
-        st.download_button(
-            label="📥 EXCELをダウンロード", data=excel_data,
-            file_name=f"{selected_store}_{year}年月度_売上月報.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", type="primary",
-            use_container_width=True
-        )
+        if "📥 Excelダウンロード" in role_info["allowed_modes"]:
+            excel_data = create_multi_sheet_excel(selected_store, year, month, bp_df, deliv_df)
+            st.download_button(
+                label="📥 Excelダウンロード", data=excel_data,
+                file_name=f"{selected_store}_{year}年月度_売上月報.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", type="primary",
+                use_container_width=True
+            )
 
     st.markdown(render_styled_html_table(df_current_slot_formatted), unsafe_allow_html=True)
