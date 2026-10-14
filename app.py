@@ -82,7 +82,6 @@ def load_credentials():
             with open(CREDENTIALS_PATH, "r", encoding="utf-8") as f:
                 data = json.load(f)
                 roles = data.get("roles", DEFAULT_ROLES)
-                # 旧キー "mita_staff" が存在する場合は自動的に "mita_tenpo" に移行する
                 if "mita_staff" in roles and "mita_tenpo" not in roles:
                     roles["mita_tenpo"] = roles.pop("mita_staff")
                     save_credentials(roles)
@@ -384,7 +383,7 @@ if not is_all_stores:
 
 # --- サイドバー設定 ---
 st.sidebar.title("メニュー")
-st.sidebar.markdown(f"👤 権限: **{role_info['name']}**")
+# ※ 権限の表示部分を削除しました
 if not is_all_stores:
     st.sidebar.markdown(f"🏬 担当店舗: **{assigned_store}**")
 
@@ -439,68 +438,65 @@ if app_mode == "⚙️ 設定（権限・パスワード管理）":
     st.markdown("権限（ロール）ごとのパスワード、利用可能機能、月報の閲覧可能月数を自由に追加・編集できます。")
     st.markdown("---")
 
-    with st.form("role_settings_form"):
-        st.subheader("🔑 登録されている権限一覧")
+    updated_roles = {}
+    for r_key, r_val in ROLES.items():
+        st.markdown(f"**権限キー (ID): `{r_key}`**")
+        col_r1, col_r2, col_r3 = st.columns(3)
+        with col_r1:
+            r_name = st.text_input(f"表示名 ({r_key})", value=r_val["name"], key=f"name_{r_key}")
+        with col_r2:
+            r_pass = st.text_input(f"パスワード ({r_key})", value=r_val["password"], type="password", key=f"pass_{r_key}")
+        with col_r3:
+            limit_val = r_val.get("months_limit", "all")
+            r_limit = st.text_input(f"閲覧可能月 ('all' または 数字)", value=str(limit_val), key=f"limit_{r_key}")
         
-        updated_roles = {}
-        for r_key, r_val in ROLES.items():
-            st.markdown(f"**権限キー (ID): `{r_key}`**")
-            col_r1, col_r2, col_r3 = st.columns(3)
-            with col_r1:
-                r_name = st.text_input(f"表示名 ({r_key})", value=r_val["name"], key=f"name_{r_key}")
-            with col_r2:
-                r_pass = st.text_input(f"パスワード ({r_key})", value=r_val["password"], type="password", key=f"pass_{r_key}")
-            with col_r3:
-                limit_val = r_val.get("months_limit", "all")
-                limit_str = str(limit_val)
-                r_limit = st.text_input(f"閲覧可能月 ('all' または 数字)", value=limit_str, key=f"limit_{r_key}")
-            
-            r_store = st.selectbox(f"担当店舗 ({r_key})", ["すべて（切替可能）"] + STORES, index=0 if r_val["store"]=="すべて（切替可能）" else STORES.index(r_val["store"])+1, key=f"store_{r_key}")
+        r_store = st.selectbox(f"担当店舗 ({r_key})", ["すべて（切替可能）"] + STORES, index=0 if r_val["store"]=="すべて（切替可能）" else STORES.index(r_val["store"])+1, key=f"store_{r_key}")
 
-            all_possible_modes = [
-                "📊 本部用（月報一覧表示）",
-                "📱 店舗用（デリバリー入力）",
-                "📋 エクセルコピペ用データ生成",
-                "📄 報告書作成",
-                "⚙️ 設定（権限・パスワード管理）"
-            ]
-            r_modes = st.multiselect(f"利用可能機能 ({r_key})", all_possible_modes, default=r_val["allowed_modes"], key=f"modes_{r_key}")
-            
-            updated_roles[r_key] = {
-                "name": r_name,
-                "password": r_pass,
-                "store": r_store,
-                "allowed_modes": r_modes,
-                "months_limit": int(r_limit) if r_limit.isdigit() else "all"
-            }
-            st.markdown("---")
-
-        st.subheader("➕ 新しい権限を追加する")
-        new_key = st.text_input("新規権限キー (例: ebisu_tenpo ※半角英数字)")
-        new_name = st.text_input("新規権限表示名 (例: 恵比寿店店舗)")
-        new_pass = st.text_input("新規パスワード", type="password")
-        new_store = st.selectbox("新規担当店舗", ["すべて（切替可能）"] + STORES)
-        new_limit = st.text_input("閲覧可能月 ('all' または 数字)", value="3")
-        new_modes = st.multiselect("新規利用可能機能", [
+        all_possible_modes = [
             "📊 本部用（月報一覧表示）",
             "📱 店舗用（デリバリー入力）",
             "📋 エクセルコピペ用データ生成",
-            "📄 報告書作成"
-        ], default=["📊 本部用（月報一覧表示）", "📱 店舗用（デリバリー入力）"])
+            "📄 報告書作成",
+            "⚙️ 設定（権限・パスワード管理）"
+        ]
+        r_modes = st.multiselect(f"利用可能機能 ({r_key})", all_possible_modes, default=r_val["allowed_modes"], key=f"modes_{r_key}")
+        
+        updated_roles[r_key] = {
+            "name": r_name,
+            "password": r_pass,
+            "store": r_store,
+            "allowed_modes": r_modes,
+            "months_limit": int(r_limit) if r_limit.isdigit() else "all"
+        }
+        st.markdown("---")
 
-        submitted = st.form_submit_button("💾 設定を保存する", type="primary")
-        if submitted:
-            if new_key and new_key not in updated_roles:
-                updated_roles[new_key] = {
-                    "name": new_name or new_key,
-                    "password": new_pass or "1234",
-                    "store": new_store,
-                    "allowed_modes": new_modes,
-                    "months_limit": int(new_limit) if new_limit.isdigit() else "all"
-                }
-            save_credentials(updated_roles)
-            st.success("🎉 権限設定を保存しました！次回ログイン時から反映されます。")
-            st.rerun()
+    st.subheader("➕ 新しい権限を追加する")
+    new_key = st.text_input("新規権限キー (例: ebisu_tenpo ※半角英数字)", key="new_role_key")
+    new_name = st.text_input("新規権限表示名 (例: 恵比寿店店舗)", key="new_role_name")
+    new_pass = st.text_input("新規パスワード", type="password", key="new_role_pass")
+    new_store = st.selectbox("新規担当店舗", ["すべて（切替可能）"] + STORES, key="new_role_store")
+    new_limit = st.text_input("閲覧可能月 ('all' または 数字)", value="3", key="new_role_limit")
+    new_modes = st.multiselect("新規利用可能機能", [
+        "📊 本部用（月報一覧表示）",
+        "📱 店舗用（デリバリー入力）",
+        "📋 エクセルコピペ用データ生成",
+        "📄 報告書作成"
+    ], default=["📊 本部用（月報一覧表示）", "📱 店舗用（デリバリー入力）"], key="new_role_modes")
+
+    if st.button("💾 設定を保存する", type="primary"):
+        if new_key and new_key not in updated_roles:
+            updated_roles[new_key] = {
+                "name": new_name or new_key,
+                "password": new_pass or "1234",
+                "store": new_store,
+                "allowed_modes": new_modes,
+                "months_limit": int(new_limit) if new_limit.isdigit() else "all"
+            }
+        save_credentials(updated_roles)
+        global ROLES
+        ROLES = updated_roles
+        st.success("🎉 権限設定を保存しました！変更が即時反映されました。")
+        st.rerun()
 
 elif app_mode == "📱 店舗用（デリバリー入力）":
     st.title("🛵 デリバリー売上 入力フォーム")
