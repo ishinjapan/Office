@@ -106,33 +106,60 @@ def auto_login(page):
         login_btn = page.locator("button[type='submit']:visible, input[type='submit']:visible, button:has-text('ログイン'):visible").first
         login_btn.click()
         
-        # 画面遷移待機（connect.airregi.jp から離脱するまで最大15秒）
+        # 画面遷移待機（店舗選択画面 choose-store が出た場合は店舗を選択して進む）
         print("・認証後の画面遷移を待機中...")
-        for _ in range(15):
+        for _ in range(25):
             page.wait_for_timeout(1000)
-            if "connect.airregi.jp" not in page.url:
+
+            # 店舗選択画面 (choose-store) が表示された場合の自動選択
+            if "choose-store" in page.url or page.locator("text='店舗を選択'").first.is_visible() or page.locator("text='利用する店舗を選択'").first.is_visible():
+                print("・店舗選択画面（choose-store）を検知しました。対象店舗を選択して進みます...")
+                page.wait_for_timeout(1500)
+                
+                clicked = False
+                for s_name in TARGET_STORES:
+                    loc = page.locator(f"text='{s_name}'").first
+                    if loc.is_visible():
+                        loc.click()
+                        clicked = True
+                        break
+                
+                if not clicked:
+                    # 店名で完全一致しない場合、店名を含む要素や最初の店舗リンクをクリック
+                    candidate = page.locator("a:visible, button:visible").filter(has_text="店").first
+                    if candidate.is_visible():
+                        candidate.click()
+                    else:
+                        first_store_link = page.locator("ul li a:visible, main a:visible").first
+                        if first_store_link.is_visible():
+                            first_store_link.click()
+                
+                page.wait_for_timeout(3500)
+
+            # Airレジ本体画面に到達したら待機ループを抜ける
+            if "airregi.jp" in page.url and "connect.airregi.jp" not in page.url:
                 break
         
-        # 15秒経過後もログイン画面にとどまっている場合はエラー内容を特定して通知
-        if "connect.airregi.jp" in page.url:
+        # 待機後も connect.airregi.jp にとどまっている場合のみエラーを通知
+        if "connect.airregi.jp" in page.url and "choose-store" not in page.url:
             body_text = page.locator("body").inner_text()
             if "認証コード" in body_text or "2段階認証" in body_text:
-                raise RuntimeError("【2段階認証エラー】AirIDの2段階認証（メール認証コード要求）画面が表示されています。海外クラウドサーバーからの接続のため追加セキュリティが作動しています。")
+                raise RuntimeError("【2段階認証エラー】AirIDの2段階認証画面が表示されています。")
             
             error_elems = page.locator(".error, [class*='error'], [role='alert'], .attention").all_inner_texts()
             error_details = " / ".join([e.strip() for e in error_elems if e.strip()])
             if error_details:
                 raise RuntimeError(f"【ログインエラー】Airレジ画面のメッセージ: {error_details}")
             
-            raise RuntimeError(f"【ログイン未完了】ログインボタン押下後も画面が遷移しませんでした。URL: {page.url}")
+            raise RuntimeError(f"【ログイン未完了】画面遷移が完了しませんでした。URL: {page.url}")
 
-        print(f"・ログイン成功を確認（現在のURL: {page.url}）")
+        print(f"・Airレジへのログイン成功を確認（現在のURL: {page.url}）")
         page.wait_for_timeout(3000)
 
 def select_store(page, store_name, is_first_store=False):
     print(f"\n--- 【店舗切り替え】「{store_name}」へ移動 ---")
     
-    # お知らせ等のポップアップモーダルがあれば閉じる
+    # ポップアップモーダルがあれば閉じる
     try:
         close_btn = page.locator("button:has-text('閉じる'), button[aria-label='閉じる'], .modal-close").first
         if close_btn.is_visible():
@@ -141,14 +168,14 @@ def select_store(page, store_name, is_first_store=False):
     except Exception:
         pass
 
-    # 店舗選択画面（一覧カードなど）が表示されている場合
+    # 店舗選択画面が表示されている場合
     target_btn = page.locator(f"text='{store_name}'").first
     if target_btn.is_visible():
         target_btn.click()
         page.wait_for_timeout(4000)
         return
 
-    # すでにその店舗の管理画面にいるか確認（1店舗目の場合）
+    # すでにその店舗の管理画面にいる場合
     if is_first_store:
         try:
             page.wait_for_selector(f"text='{store_name}'", timeout=3000)
@@ -156,7 +183,7 @@ def select_store(page, store_name, is_first_store=False):
         except Exception:
             pass
 
-    # ヘッダーの店舗切り替えボタン操作
+    # ヘッダーから店舗切り替え
     store_trigger = page.locator("header button, header a, div[class*='shop'], div[class*='Header']").filter(has_text="店").first
     if not store_trigger.is_visible():
         store_trigger = page.get_by_text("三田おにぎり").or_(page.get_by_text("おにぎり維心")).first
