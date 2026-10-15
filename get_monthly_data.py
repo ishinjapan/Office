@@ -5,12 +5,6 @@ import platform
 import subprocess
 import re
 from datetime import datetime, timedelta
-
-# --- 最小修正1: タイムゾーンを日本時間(JST)に固定 ---
-os.environ['TZ'] = 'Asia/Tokyo'
-if hasattr(time, 'tzset'):
-    time.tzset()
-
 import pandas as pd
 from dotenv import load_dotenv
 from playwright.sync_api import sync_playwright
@@ -164,7 +158,7 @@ def select_store(page, store_name, is_first_store=False):
             short_kw = k
             break
 
-    # --- 最小修正2: 三田本店の店舗切り替えスキップを廃止（確実に切り替える） ---
+    # --- 三田本店の店舗切り替えスキップを廃止（確実に切り替える） ---
     # if is_first_store:
     #     ...
 
@@ -257,139 +251,4 @@ def extract_sales_for_date(page, target_date):
     year_str, month_str, day_str = f"{dt.year}年", f"{dt.month}月", f"{dt.day}日"
     day_num_str = f"{dt.day}日"
 
-    print(f"・ {target_date} ({year_str} {month_str} {day_num_str}) のデータを指定中...")
-    page.wait_for_timeout(1000)
-
-    try:
-        page.evaluate("""() => {
-            const selects = Array.from(document.querySelectorAll('select'));
-            for (let sel of selects) {
-                for (let opt of sel.options) {
-                    if (opt.text.includes('時間別')) {
-                        sel.value = opt.value;
-                        sel.dispatchEvent(new Event('change', { bubbles: true }));
-                        break;
-                    }
-                }
-            }
-        }""")
-        page.wait_for_timeout(1000)
-    except Exception:
-        pass
-
-    page.evaluate("""({ yearStr, monthStr, dayNumStr }) => {
-        const selects = Array.from(document.querySelectorAll('select'));
-        for (let sel of selects) {
-            for (let opt of sel.options) {
-                let t = opt.text.trim();
-                if (t === yearStr || t === monthStr || t === dayNumStr || t === String(parseInt(dayNumStr))) {
-                    sel.value = opt.value;
-                    sel.dispatchEvent(new Event('change', { bubbles: true }));
-                }
-            }
-        }
-    }""", {"yearStr": year_str, "monthStr": month_str, "dayNumStr": day_num_str})
-    
-    page.wait_for_timeout(1000)
-
-    btn = page.locator("button:has-text('表示する'), button:has-text('表示'), input[value*='表示']").first
-    if btn.is_visible():
-        btn.click(force=True)
-        print("・「表示する」ボタンを押下。データ読み込みを待機中...")
-        # --- 最小修正3: テーブルが空になるのを防ぐため、3.5秒から5秒へ待機時間を延長 ---
-        page.wait_for_timeout(5000)
-
-    try:
-        page.wait_for_selector("table tbody tr, table tr", timeout=15000)
-        page.wait_for_timeout(2000)
-    except Exception:
-        pass
-
-    rows = page.locator("table tr").all()
-    store_rows = []
-    for row in rows:
-        cells = row.locator("th, td").all()
-        row_text = [cell.inner_text().strip().replace("\n", " ") for cell in cells]
-        if any(row_text):
-            store_rows.append(row_text)
-
-    print(f"・抽出行数: {len(store_rows)} 行 (現在のURL: {page.url})")
-    return store_rows
-
-def main():
-    if len(sys.argv) > 2:
-        start_date_str = sys.argv[1]
-        end_date_str = sys.argv[2]
-    elif len(sys.argv) > 1:
-        start_date_str = sys.argv[1]
-        end_date_str = sys.argv[1]
-    else:
-        d = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
-        start_date_str, end_date_str = d, d
-
-    start_dt = datetime.strptime(start_date_str, "%Y-%m-%d")
-    end_dt = datetime.strptime(end_date_str, "%Y-%m-%d")
-    
-    date_list = []
-    curr = start_dt
-    while curr <= end_dt:
-        date_list.append(curr.strftime("%Y-%m-%d"))
-        curr += timedelta(days=1)
-
-    print(f"=== 対象期間: {start_date_str} 〜 {end_date_str} ({len(date_list)}日間) ===")
-
-    is_cloud = (platform.system() == "Linux")
-    run_headless = True if is_cloud else False
-    
-    launch_args = ["--start-maximized"]
-    if is_cloud:
-        launch_args.extend([
-            "--no-sandbox",
-            "--disable-dev-shm-usage",
-            "--disable-gpu"
-        ])
-
-    with sync_playwright() as p:
-        context = p.chromium.launch_persistent_context(
-            user_data_dir=USER_DATA_DIR,
-            headless=run_headless,
-            viewport={"width": 1920, "height": 1080},
-            timezone_id="Asia/Tokyo",  # タイムゾーンの固定
-            locale="ja-JP",
-            args=launch_args
-        )
-        page = context.new_page()
-
-        try:
-            auto_login(page)
-
-            for target_date in date_list:
-                print(f"\n--- 【処理日】 {target_date} ---")
-                all_stores_data = []
-
-                for index, store_name in enumerate(TARGET_STORES):
-                    is_first = (index == 0)
-                    select_store(page, store_name, is_first_store=is_first)
-                    
-                    navigate_to_sales_page(page)
-
-                    store_rows = extract_sales_for_date(page, target_date)
-                    for r in store_rows:
-                        all_stores_data.append([store_name] + r)
-
-                if not all_stores_data:
-                    raise RuntimeError(f"【データ取得失敗】{target_date} の売上テーブルからデータを1件も抽出できませんでした。現在のURL: {page.url}")
-
-                df = pd.DataFrame(all_stores_data)
-                csv_path = os.path.join(OUTPUT_DIR, f"4店舗_時間別売上_{target_date}.csv")
-                df.to_csv(csv_path, index=False, header=False, encoding="utf-8-sig")
-                print(f"[保存完了] {csv_path} (全 {len(all_stores_data)} 行)")
-
-        except Exception as e:
-            print(f"[ERROR] 処理中にエラーが発生しました: {e}")
-            raise e
-        finally:
-            context.close()
-
-if __name__ == "__main__":
-    main()
+    print(f"・ {target_date}
