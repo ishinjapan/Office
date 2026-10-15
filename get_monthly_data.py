@@ -3,6 +3,7 @@ import sys
 import time
 import platform
 import subprocess
+import re
 from datetime import datetime, timedelta
 import pandas as pd
 from dotenv import load_dotenv
@@ -111,7 +112,6 @@ def auto_login(page):
         for _ in range(25):
             page.wait_for_timeout(1000)
 
-            # 店舗選択画面 (choose-store) が表示された場合の自動選択
             if "choose-store" in page.url or page.locator("text='店舗を選択'").first.is_visible() or page.locator("text='利用する店舗を選択'").first.is_visible():
                 print("・店舗選択画面（choose-store）を検知しました。対象店舗を選択して進みます...")
                 page.wait_for_timeout(1500)
@@ -125,7 +125,6 @@ def auto_login(page):
                         break
                 
                 if not clicked:
-                    # 店名で完全一致しない場合、店名を含む要素や最初の店舗リンクをクリック
                     candidate = page.locator("a:visible, button:visible").filter(has_text="店").first
                     if candidate.is_visible():
                         candidate.click()
@@ -136,11 +135,9 @@ def auto_login(page):
                 
                 page.wait_for_timeout(3500)
 
-            # Airレジ本体画面に到達したら待機ループを抜ける
             if "airregi.jp" in page.url and "connect.airregi.jp" not in page.url:
                 break
         
-        # 待機後も connect.airregi.jp にとどまっている場合のみエラーを通知
         if "connect.airregi.jp" in page.url and "choose-store" not in page.url:
             body_text = page.locator("body").inner_text()
             if "認証コード" in body_text or "2段階認証" in body_text:
@@ -159,6 +156,13 @@ def auto_login(page):
 def select_store(page, store_name, is_first_store=False):
     print(f"\n--- 【店舗切り替え】「{store_name}」へ移動 ---")
     
+    # 短縮キーワードの取得（恵比寿、五反田、中目黒、三田）
+    short_kw = ""
+    for k in ["三田", "恵比寿", "五反田", "中目黒"]:
+        if k in store_name:
+            short_kw = k
+            break
+
     # ポップアップモーダルがあれば閉じる
     try:
         close_btn = page.locator("button:has-text('閉じる'), button[aria-label='閉じる'], .modal-close").first
@@ -168,44 +172,83 @@ def select_store(page, store_name, is_first_store=False):
     except Exception:
         pass
 
-    # 店舗選択画面が表示されている場合
-    target_btn = page.locator(f"text='{store_name}'").first
-    if target_btn.is_visible():
-        target_btn.click()
-        page.wait_for_timeout(4000)
-        return
-
-    # すでにその店舗の管理画面にいる場合
+    # 1店舗目で既にその店舗が表示されている場合はスキップ
     if is_first_store:
         try:
-            page.wait_for_selector(f"text='{store_name}'", timeout=3000)
-            return
+            header_text = page.locator("header").inner_text() if page.locator("header").is_visible() else ""
+            if (short_kw and short_kw in header_text) or store_name in header_text:
+                print(f"・1店舗目「{store_name}」は既に選択済みです。")
+                return
         except Exception:
             pass
 
-    # ヘッダーから店舗切り替え
-    store_trigger = page.locator("header button, header a, div[class*='shop'], div[class*='Header']").filter(has_text="店").first
+    # 1. ヘッダーの店舗名 / 切り替えトリガーをクリックしてメニューを展開
+    print("・ヘッダーの店舗メニューをクリック...")
+    store_trigger = page.locator("header button, header a, div[class*='shop'], div[class*='Header'], [class*='shopName']").filter(has_text="店").first
     if not store_trigger.is_visible():
-        store_trigger = page.get_by_text("三田おにぎり").or_(page.get_by_text("おにぎり維心")).first
-    
-    store_trigger.wait_for(state="visible", timeout=15000)
-    store_trigger.click()
-    page.wait_for_timeout(1500)
-    
-    switch_btn = page.locator("text='店舗切り替え', text='店舗切替'").first
+        store_trigger = page.locator("header").get_by_text(re.compile(r"(三田|維心|店)")).first
+
+    if store_trigger.is_visible():
+        store_trigger.click()
+        page.wait_for_timeout(1500)
+
+    # 2. メニュー内の「店舗切替」または「店舗切り替え」ボタンをクリック
+    switch_btn = page.locator("a, button, li, span, div").filter(has_text=re.compile(r"店舗切[り]*替[え]*")).first
     if switch_btn.is_visible():
+        print("・「店舗切替」ボタンをクリック...")
         switch_btn.click()
-        page.wait_for_timeout(2000)
-        
-    page.locator(f"text='{store_name}'").first.click()
-    page.wait_for_timeout(3500)
+        page.wait_for_timeout(2500)
+
+    # 3. 店舗一覧（モーダルまたはリスト）から対象店舗をクリック（表記ゆれ対応）
+    print(f"・店舗一覧から「{store_name}」を選択中...")
+    
+    candidates = [
+        page.locator(f"text='{store_name}'").first,
+        page.locator(f"text='{store_name.replace(' ', ' ')}'").first,  # 全角スペース
+        page.locator(f"text={store_name}").first,
+        page.locator(f"a:has-text('{short_kw}'), button:has-text('{short_kw}'), li:has-text('{short_kw}'), div:has-text('{short_kw}'), tr:has-text('{short_kw}')").first,
+        page.get_by_text(short_kw).first
+    ]
+    
+    store_clicked = False
+    for cand in candidates:
+        try:
+            if cand.is_visible():
+                cand.click(force=True)
+                store_clicked = True
+                print(f"・「{store_name}」の選択に成功しました。")
+                break
+        except Exception:
+            continue
+
+    if not store_clicked:
+        # 万が一見つからない場合は部分一致で待機してクリック
+        target = page.locator(f"text={short_kw}").first
+        target.wait_for(state="visible", timeout=15000)
+        target.click(force=True)
+
+    page.wait_for_timeout(4000)
 
 def navigate_to_sales_page(page):
+    page.wait_for_timeout(1500)
+    
+    # すでに日別売上画面の条件設定枠が表示されているならスキップ
+    if page.locator("button:has-text('表示する'), button:has-text('表示')").first.is_visible():
+        return
+
+    # 「日別売上」リンクが直接見えている場合はクリック
+    daily_link = page.locator("text='日別売上'").first
+    if daily_link.is_visible():
+        daily_link.click()
+        page.wait_for_timeout(2500)
+        return
+
+    # 見えていない場合は「売上・分析」を展開してから「日別売上」へ
     sales_menu = page.locator("text='売上・分析'").first
-    page.wait_for_selector("text='売上・分析'", timeout=15000)
-    if not page.locator("text='日別売上'").first.is_visible():
+    if sales_menu.is_visible():
         sales_menu.click()
         page.wait_for_timeout(1500)
+    
     page.wait_for_selector("text='日別売上'", timeout=15000)
     page.locator("text='日別売上'").first.click()
     page.wait_for_timeout(2500)
@@ -296,9 +339,11 @@ def main():
         ])
 
     with sync_playwright() as p:
+        # 解像度を 1920x1080（フルHD）に指定してPCと同じレイアウトを維持
         context = p.chromium.launch_persistent_context(
             user_data_dir=USER_DATA_DIR,
             headless=run_headless,
+            viewport={"width": 1920, "height": 1080},
             args=launch_args
         )
         page = context.new_page()
@@ -314,14 +359,8 @@ def main():
                     is_first = (index == 0)
                     select_store(page, store_name, is_first_store=is_first)
                     
-                    if index == 0 and target_date == date_list[0]:
-                        navigate_to_sales_page(page)
-                    else:
-                        try:
-                            page.locator("text='日別売上'").first.click()
-                            page.wait_for_timeout(1500)
-                        except Exception:
-                            navigate_to_sales_page(page)
+                    # 常に確実に「日別売上」ページへナビゲート
+                    navigate_to_sales_page(page)
 
                     store_rows = extract_sales_for_date(page, target_date)
                     for r in store_rows:
