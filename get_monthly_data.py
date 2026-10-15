@@ -154,7 +154,7 @@ def auto_login(page):
         page.wait_for_timeout(3000)
 
 def select_store(page, store_name, is_first_store=False):
-    print(f"\n--- 【店舗切り替え】「{store_name}」へ移動開始 ---")
+    print(f"\n--- 【店舗切り替え】「{store_name}」へ移動 ---")
     
     short_kw = ""
     for k in ["三田", "恵比寿", "五反田", "中目黒"]:
@@ -162,269 +162,36 @@ def select_store(page, store_name, is_first_store=False):
             short_kw = k
             break
 
-    # 1. すでに該当店舗の画面にいるか確認（1店舗目の場合など）
+    # 最初から店舗選択一覧画面が出ている場合
+    if page.locator("text='利用する店舗を選択'").is_visible() or page.locator("text='店舗を選択'").is_visible():
+        target = page.locator(f"text='{store_name}'").or_(page.get_by_text(short_kw)).first
+        target.wait_for(state="visible", timeout=15000)
+        target.click()
+        page.wait_for_timeout(4000)
+        return
+
+    # 1店舗目で既にその店舗が表示されている場合はスキップ
     if is_first_store:
         try:
-            body_text = page.locator("body").inner_text()
-            if short_kw in body_text[:1200]:
-                print(f"・1店舗目「{store_name}」は既に選択済みです。")
-                return
+            page.wait_for_selector(f"text='{short_kw}'", timeout=4000)
+            print(f"・1店舗目「{store_name}」は既に選択済みです。")
+            return
         except Exception:
             pass
 
-    # 2. ポップアップやモーダルがあれば閉じる
-    for close_sel in ["button:has-text('閉じる')", "button[aria-label='閉じる']", ".modal-close", ".close"]:
-        try:
-            btn = page.locator(close_sel).first
-            if btn.is_visible():
-                btn.click()
-                page.wait_for_timeout(1000)
-        except Exception:
-            pass
+    # ヘッダーの店舗名トリガーをクリック
+    store_trigger = page.locator("header button, header a, div[class*='shop'], div[class*='Header']").filter(has_text="店").first
+    if not store_trigger.is_visible():
+        store_trigger = page.get_by_text("三田おにぎり").or_(page.get_by_text("おにぎり維心")).first
 
-    # 3. 「店舗切り替え」画面（一覧やモーダル）が開いているか確認
-    is_switch_screen = False
-    for kw in ["利用する店舗を選択", "店舗を選択", "店舗の切り替え", "店舗切替"]:
-        if page.locator(f"text='{kw}'").first.is_visible():
-            is_switch_screen = True
-            break
-
-    # 4. 切り替え画面が開いていない場合、メニューを展開して開く
-    if not is_switch_screen:
-        # 画面上に「店舗切り替え」ボタンが直接あるか確認
-        direct_btn = page.locator("button, a, div, span").filter(has_text=re.compile(r"^店舗切[り]*替[え]*$")).first
-        if direct_btn.is_visible():
-            print("・画面上の「店舗切り替え」ボタンを直接クリック...")
-            direct_btn.click()
-            page.wait_for_timeout(2500)
-        else:
-            print("・画面上部の店舗情報エリアをクリックしてメニューを展開...")
-            # 画面上部（Y座標0〜120px）にある店舗名要素を直接クリック
-            page.evaluate("""() => {
-                const elems = Array.from(document.querySelectorAll('button, a, div, span, li, p'));
-                for (let el of elems) {
-                    const rect = el.getBoundingClientRect();
-                    if (rect.top >= 0 && rect.top <= 120 && rect.width > 0 && rect.height > 0) {
-                        const txt = el.innerText || '';
-                        if (txt.includes('店') || txt.includes('三田') || txt.includes('維心')) {
-                            el.click();
-                            return true;
-                        }
-                    }
-                }
-                return false;
-            }""")
-            page.wait_for_timeout(1500)
-
-            # メニュー内の「店舗切り替え」をクリック
-            switch_link = page.locator("text='店舗切り替え', text='店舗切替'").first
-            if switch_link.is_visible():
-                print("・展開されたメニューから「店舗切り替え」をクリック...")
-                switch_link.click()
-                page.wait_for_timeout(2500)
-            else:
-                page.evaluate("""() => {
-                    const elems = Array.from(document.querySelectorAll('a, button, li, span, div'));
-                    for (let el of elems) {
-                        if (el.innerText && el.innerText.trim().match(/^店舗切[り]*替[え]*$/)) {
-                            el.click();
-                            return true;
-                        }
-                    }
-                    return false;
-                }""")
-                page.wait_for_timeout(2500)
-
-    # 5. 店舗一覧から対象店舗（恵比寿など）を確実にクリック
-    print(f"・対象店舗「{store_name}」（キーワード: {short_kw}）をクリック中...")
-    
-    click_success = page.evaluate("""({ storeName, shortKw }) => {
-        const all = Array.from(document.querySelectorAll('a, button, li, tr, div, span'));
-        // 1. 店舗名（スペース有無問わず）を含む可視要素
-        for (let el of all) {
-            const txt = (el.innerText || '').trim();
-            if (txt === storeName || txt === storeName.replace(' ', ' ') || (shortKw && txt.includes(shortKw) && txt.includes('店'))) {
-                const rect = el.getBoundingClientRect();
-                if (rect.width > 0 && rect.height > 0) {
-                    el.click();
-                    return { success: true, text: txt };
-                }
-            }
-        }
-        // 2. 短縮キーワード単体を含む可視要素
-        for (let el of all) {
-            const txt = (el.innerText || '').trim();
-            if (shortKw && txt.includes(shortKw)) {
-                const rect = el.getBoundingClientRect();
-                if (rect.width > 0 && rect.height > 0) {
-                    el.click();
-                    return { success: true, text: txt };
-                }
-            }
-        }
-        return { success: false };
-    }""", {"storeName": store_name, "shortKw": short_kw})
-
-    if not click_success.get("success"):
-        # フォールバック: Playwrightセレクタで待機してクリック
-        target = page.locator(f"a:has-text('{short_kw}'), button:has-text('{short_kw}'), text={short_kw}").first
-        target.wait_for(state="visible", timeout=10000)
-        target.click(force=True)
-
-    page.wait_for_timeout(4000)
-    print(f"・店舗切り替え完了（現在のURL: {page.url}）")
-
-def navigate_to_sales_page(page):
+    store_trigger.wait_for(state="visible", timeout=15000)
+    store_trigger.click()
     page.wait_for_timeout(1500)
-    
-    # すでに日別売上画面の条件設定枠が表示されているならスキップ
-    if page.locator("button:has-text('表示する'), button:has-text('表示')").first.is_visible():
-        return
 
-    # 「日別売上」リンクが直接見えている場合はクリック
-    daily_link = page.locator("text='日別売上'").first
-    if daily_link.is_visible():
-        daily_link.click()
-        page.wait_for_timeout(2500)
-        return
+    # 「店舗切り替え」ボタンをクリック
+    switch_btn = page.locator("text='店舗切り替え'").or_(page.locator("text='店舗切替'")).first
+    switch_btn.wait_for(state="visible", timeout=10000)
+    switch_btn.click()
+    page.wait_for_timeout(2500)
 
-    # 見えていない場合は「売上・分析」を展開してから「日別売上」へ
-    sales_menu = page.locator("text='売上・分析'").first
-    if sales_menu.is_visible():
-        sales_menu.click()
-        page.wait_for_timeout(1500)
-    
-    try:
-        page.wait_for_selector("text='日別売上'", timeout=8000)
-        page.locator("text='日別売上'").first.click()
-        page.wait_for_timeout(2500)
-    except Exception:
-        # 万が一メニューから遷移できない場合は直接URLへアクセス
-        page.goto("https://airregi.jp/CLP/view/sales/daily/", wait_until="domcontentloaded")
-        page.wait_for_timeout(2500)
-
-def extract_sales_for_date(page, target_date):
-    dt = datetime.strptime(target_date, "%Y-%m-%d")
-    year_str, month_str, day_str = f"{dt.year}年", f"{dt.month}月", f"{dt.day}日"
-    day_num_str = f"{dt.day}日"
-
-    print(f"・ {target_date} ({year_str} {month_str} {day_num_str}) のデータを指定中...")
-
-    try:
-        page.evaluate("""() => {
-            const selects = Array.from(document.querySelectorAll('select'));
-            for (let sel of selects) {
-                for (let opt of sel.options) {
-                    if (opt.text.includes('時間別')) {
-                        sel.value = opt.value;
-                        sel.dispatchEvent(new Event('change', { bubbles: true }));
-                        break;
-                    }
-                }
-            }
-        }""")
-    except Exception:
-        pass
-
-    page.evaluate("""({ yearStr, monthStr, dayNumStr }) => {
-        const selects = Array.from(document.querySelectorAll('select'));
-        for (let sel of selects) {
-            for (let opt of sel.options) {
-                let t = opt.text.trim();
-                if (t === yearStr || t === monthStr || t === dayNumStr || t === String(parseInt(dayNumStr))) {
-                    sel.value = opt.value;
-                    sel.dispatchEvent(new Event('change', { bubbles: true }));
-                }
-            }
-        }
-    }""", {"yearStr": year_str, "monthStr": month_str, "dayNumStr": day_num_str})
-
-    page.wait_for_timeout(1000)
-
-    btn = page.locator("button:has-text('表示する'), button:has-text('表示'), input[value*='表示']").first
-    if btn.is_visible():
-        btn.click(force=True)
-        page.wait_for_timeout(3500)
-
-    rows = page.locator("table tr").all()
-    store_rows = []
-    for row in rows:
-        cells = row.locator("th, td").all()
-        row_text = [cell.inner_text().strip().replace("\n", " ") for cell in cells]
-        if any(row_text):
-            store_rows.append(row_text)
-    return store_rows
-
-def main():
-    if len(sys.argv) > 2:
-        start_date_str = sys.argv[1]
-        end_date_str = sys.argv[2]
-    elif len(sys.argv) > 1:
-        start_date_str = sys.argv[1]
-        end_date_str = sys.argv[1]
-    else:
-        d = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
-        start_date_str, end_date_str = d, d
-
-    start_dt = datetime.strptime(start_date_str, "%Y-%m-%d")
-    end_dt = datetime.strptime(end_date_str, "%Y-%m-%d")
-    
-    date_list = []
-    curr = start_dt
-    while curr <= end_dt:
-        date_list.append(curr.strftime("%Y-%m-%d"))
-        curr += timedelta(days=1)
-
-    print(f"=== 対象期間: {start_date_str} 〜 {end_date_str} ({len(date_list)}日間) ===")
-
-    is_cloud = (platform.system() == "Linux")
-    run_headless = True if is_cloud else False
-    
-    launch_args = ["--start-maximized"]
-    if is_cloud:
-        launch_args.extend([
-            "--no-sandbox",
-            "--disable-dev-shm-usage",
-            "--disable-gpu"
-        ])
-
-    with sync_playwright() as p:
-        context = p.chromium.launch_persistent_context(
-            user_data_dir=USER_DATA_DIR,
-            headless=run_headless,
-            viewport={"width": 1920, "height": 1080},
-            args=launch_args
-        )
-        page = context.new_page()
-
-        try:
-            auto_login(page)
-
-            for target_date in date_list:
-                print(f"\n--- 【処理日】 {target_date} ---")
-                all_stores_data = []
-
-                for index, store_name in enumerate(TARGET_STORES):
-                    is_first = (index == 0)
-                    select_store(page, store_name, is_first_store=is_first)
-                    
-                    navigate_to_sales_page(page)
-
-                    store_rows = extract_sales_for_date(page, target_date)
-                    for r in store_rows:
-                        all_stores_data.append([store_name] + r)
-
-                if all_stores_data:
-                    df = pd.DataFrame(all_stores_data)
-                    csv_path = os.path.join(OUTPUT_DIR, f"4店舗_時間別売上_{target_date}.csv")
-                    df.to_csv(csv_path, index=False, header=False, encoding="utf-8-sig")
-                    print(f"[保存完了] {csv_path}")
-
-        except Exception as e:
-            print(f"[ERROR] 処理中にエラーが発生しました: {e}")
-            raise e
-        finally:
-            context.close()
-
-if __name__ == "__main__":
-    main()
+    # 店舗一覧から対象店舗をクリック（完全一致、全角スペース、
