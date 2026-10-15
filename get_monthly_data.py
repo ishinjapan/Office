@@ -3,7 +3,6 @@ import sys
 import time
 import platform
 import subprocess
-import re
 from datetime import datetime, timedelta
 import pandas as pd
 from dotenv import load_dotenv
@@ -42,8 +41,6 @@ TARGET_STORES = [
     "おにぎり維心 五反田店",
     "おにぎり維心 中目黒店"
 ]
-
-STORE_SELECT_URL = "https://airregi.jp/CLP/view/displayPlfSettingStoreSelect/?transitionUrl=https%3A%2F%2Fairregi.jp%2FCLP%2Fview%2Ftop%2F"
 
 def auto_login(page):
     page.goto("https://airregi.jp/CLP/view/top/", wait_until="domcontentloaded")
@@ -149,7 +146,7 @@ def auto_login(page):
         print(f"・Airレジへのログイン成功を確認（現在のURL: {page.url}）")
         page.wait_for_timeout(3000)
 
-def select_store(page, store_name, is_first_store=False):
+def select_store(page, store_name):
     print(f"\n--- 【店舗切り替え】「{store_name}」へ移動 ---")
     
     short_kw = ""
@@ -158,158 +155,93 @@ def select_store(page, store_name, is_first_store=False):
             short_kw = k
             break
 
-    # 1店舗目で既にその店舗が表示されている場合はスキップ
-    if is_first_store:
-        try:
-            if page.locator(f"text='{short_kw}'").first.is_visible():
-                print(f"・1店舗目「{store_name}」は既に選択済みです。")
-                return
-        except Exception:
-            pass
-
-    # 店舗選択画面へ遷移
-    print("・店舗選択画面へ移動中...")
-    switch_link = page.locator("a[href*='displayPlfSettingStoreSelect']").first
-    if switch_link.count() > 0:
-        try:
-            switch_link.click(force=True)
-            page.wait_for_timeout(2500)
-        except Exception:
-            page.goto(STORE_SELECT_URL, wait_until="domcontentloaded")
-            page.wait_for_timeout(2500)
-    else:
-        page.goto(STORE_SELECT_URL, wait_until="domcontentloaded")
-        page.wait_for_timeout(2500)
+    # 確実にAirレジ公式の店舗選択画面へ直接ジャンプする（隠しボタン誤検知の防止）
+    page.goto("https://airregi.jp/CLP/view/displayPlfSettingStoreSelect/", wait_until="domcontentloaded")
+    page.wait_for_timeout(2500)
 
     # 店舗選択画面で対象店舗をクリック
-    print(f"・店舗一覧から「{store_name}」({short_kw}) を選択中...")
-    target = (
-        page.locator(f":is(a, button, li, tr, div):has-text('{short_kw}')")
-        .filter(has_text="店")
-        .first
-    )
+    target = page.locator(f":is(a, button, li, tr, div):has-text('{short_kw}')").filter(has_text="店").first
     if not target.is_visible():
         target = page.locator(f"text='{short_kw}'").first
 
     try:
-        target.wait_for(state="visible", timeout=15000)
+        target.wait_for(state="visible", timeout=10000)
         target.click(force=True)
+        page.wait_for_timeout(3500)
+        print(f"・「{store_name}」への切り替え完了")
     except Exception:
-        clicked = page.evaluate("""(kw) => {
-            const all = Array.from(document.querySelectorAll('a, button, li, tr, div, span'));
-            for (let el of all) {
-                const txt = (el.innerText || '').trim();
-                if (txt.includes(kw)) {
-                    el.click();
-                    return true;
-                }
-            }
-            return false;
-        }""", short_kw)
-        if not clicked:
-            raise RuntimeError(f"店舗選択画面で「{store_name}」({short_kw}) が見つかりませんでした。")
-
-    page.wait_for_timeout(3500)
-    print(f"・「{store_name}」への切り替え完了")
+        raise RuntimeError(f"店舗選択画面で「{store_name}」が見つかりませんでした。")
 
 def navigate_to_sales_page(page):
-    """「売上・分析」メニューを展開して確実に日別売上ページへ移動する"""
     print("・日別売上画面へ移動中...")
     page.wait_for_timeout(2000)
 
-    # 既に日別売上画面に滞在している場合
     if page.locator("button:has-text('表示する'), button:has-text('表示')").first.is_visible():
-        print("・既に日別売上画面に滞在しています。")
         return
 
-    # 「売上・分析」メニューを展開
     try:
         sales_menu = page.locator("text='売上・分析'").first
-        sales_menu.wait_for(state="visible", timeout=15000)
+        sales_menu.wait_for(state="visible", timeout=10000)
         if not page.locator("text='日別売上'").first.is_visible():
             sales_menu.click()
             page.wait_for_timeout(1500)
-    except Exception as e:
-        print(f"・メニュー待機エラー: {e}")
-
-    # 「日別売上」をクリック
-    try:
+        
         daily_btn = page.locator("text='日別売上'").first
-        daily_btn.wait_for(state="visible", timeout=15000)
+        daily_btn.wait_for(state="visible", timeout=10000)
         daily_btn.click()
         page.wait_for_timeout(3000)
-    except Exception:
-        page.evaluate("""() => {
-            const all = Array.from(document.querySelectorAll('a, button, span, li, div'));
-            for (let el of all) {
-                if ((el.innerText || '').trim() === '日別売上') {
-                    el.click();
-                    return true;
-                }
-            }
-            return false;
-        }""")
-        page.wait_for_timeout(3000)
-
-    # 画面描画の確認
-    try:
-        page.wait_for_selector("button:has-text('表示する'), button:has-text('表示'), select", timeout=15000)
-        print("・日別売上画面の読み込み完了を確認")
-    except Exception:
-        print(f"・日別売上画面の読み込み待機タイムアウト (URL: {page.url})")
+    except Exception as e:
+        print(f"・メニュー遷移エラー: {e}")
 
 def extract_sales_for_date(page, target_date):
     dt = datetime.strptime(target_date, "%Y-%m-%d")
     year_str, month_str, day_str = f"{dt.year}年", f"{dt.month}月", f"{dt.day}日"
-    day_num_str = f"{dt.day}日"
-
-    print(f"・ {target_date} ({year_str} {month_str} {day_num_str}) のデータを指定中...")
+    
+    print(f"・ {target_date} のデータを指定中...")
     page.wait_for_timeout(1000)
 
-    # 集計対象を「時間別」に切り替え
+    # JavaScriptを廃止し、Playwrightの確実なネイティブ選択（select_option）を使用する
     try:
-        page.evaluate("""() => {
-            const selects = Array.from(document.querySelectorAll('select'));
-            for (let sel of selects) {
-                for (let opt of sel.options) {
-                    if (opt.text.includes('時間別')) {
-                        sel.value = opt.value;
-                        sel.dispatchEvent(new Event('change', { bubbles: true }));
-                        break;
-                    }
-                }
-            }
-        }""")
-        page.wait_for_timeout(1000)
-    except Exception:
-        pass
+        selects = page.locator("select").all()
+        if len(selects) >= 4:
+            selects[0].select_option(label="時間別")
+            selects[1].select_option(label=year_str)
+            selects[2].select_option(label=month_str)
+            
+            # 日付（"14日" もしくは "14"）の選択
+            day_opts = selects[3].locator("option").all_inner_texts()
+            opts_clean = [o.strip() for o in day_opts]
+            if day_str in opts_clean:
+                selects[3].select_option(label=day_str)
+            else:
+                selects[3].select_option(label=str(dt.day))
+    except Exception as e:
+        print(f"・ネイティブ選択エラー: {e}")
 
-    # 日付プルダウンの選択
-    page.evaluate("""({ yearStr, monthStr, dayNumStr }) => {
-        const selects = Array.from(document.querySelectorAll('select'));
-        for (let sel of selects) {
-            for (let opt of sel.options) {
-                let t = opt.text.trim();
-                if (t === yearStr || t === monthStr || t === dayNumStr || t === String(parseInt(dayNumStr))) {
-                    sel.value = opt.value;
-                    sel.dispatchEvent(new Event('change', { bubbles: true }));
-                }
-            }
-        }
-    }""", {"yearStr": year_str, "monthStr": month_str, "dayNumStr": day_num_str})
     page.wait_for_timeout(1000)
 
-    # 「表示する」ボタンをクリック
     btn = page.locator("button:has-text('表示する'), button:has-text('表示'), input[value*='表示']").first
     if btn.is_visible():
+        # クリック前の状態を記録
+        before_html = page.locator("table").first.inner_html() if page.locator("table").first.is_visible() else ""
+        
         btn.click(force=True)
         print("・「表示する」ボタンを押下。データ読み込みを待機中...")
-        page.wait_for_timeout(4000)
-
-    # テーブル行の描画待機
-    try:
-        page.wait_for_selector("table tbody tr, table tr", timeout=15000)
+        
+        # テーブルの内容が更新されるまで待機（最大15秒）
+        for _ in range(15):
+            page.wait_for_timeout(1000)
+            after_html = page.locator("table").first.inner_html() if page.locator("table").first.is_visible() else ""
+            if before_html != after_html and after_html != "":
+                break
         page.wait_for_timeout(2000)
+
+    # 「時間帯別表示」ボタンを念のためクリック
+    try:
+        slot_btn = page.locator("button:has-text('時間帯別表示'), [role='tab']:has-text('時間帯別表示')").first
+        if slot_btn.is_visible():
+            slot_btn.click(force=True)
+            page.wait_for_timeout(2000)
     except Exception:
         pass
 
@@ -321,7 +253,7 @@ def extract_sales_for_date(page, target_date):
         if any(row_text):
             store_rows.append(row_text)
 
-    print(f"・抽出行数: {len(store_rows)} 行 (現在のURL: {page.url})")
+    print(f"・抽出行数: {len(store_rows)} 行")
     return store_rows
 
 def main():
@@ -344,7 +276,7 @@ def main():
         date_list.append(curr.strftime("%Y-%m-%d"))
         curr += timedelta(days=1)
 
-    print(f"=== 対象期間: {start_date_str} 〜 {end_date_str} ({len(date_list)}日間) ===")
+    print(f"=== 対象期間: {start_date_str} 〜 {end_date_str} ===")
 
     is_cloud = (platform.system() == "Linux")
     run_headless = True if is_cloud else False
@@ -373,9 +305,9 @@ def main():
                 print(f"\n--- 【処理日】 {target_date} ---")
                 all_stores_data = []
 
-                for index, store_name in enumerate(TARGET_STORES):
-                    is_first = (index == 0)
-                    select_store(page, store_name, is_first_store=is_first)
+                for store_name in TARGET_STORES:
+                    # 全店舗必ずストアセレクト画面を経由する
+                    select_store(page, store_name)
                     
                     navigate_to_sales_page(page)
 
@@ -384,7 +316,7 @@ def main():
                         all_stores_data.append([store_name] + r)
 
                 if not all_stores_data:
-                    raise RuntimeError(f"【データ取得失敗】{target_date} の売上テーブルからデータを1件も抽出できませんでした。現在のURL: {page.url}")
+                    raise RuntimeError(f"【データ取得失敗】{target_date} の売上データを抽出できませんでした。")
 
                 df = pd.DataFrame(all_stores_data)
                 csv_path = os.path.join(OUTPUT_DIR, f"4店舗_時間別売上_{target_date}.csv")
