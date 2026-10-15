@@ -3,17 +3,15 @@ import sys
 import time
 import platform
 import subprocess
-import re
 from datetime import datetime, timedelta
-
-# --- ★最重要：OSレベルでタイムゾーンを日本時間(JST)に完全固定 ---
-os.environ['TZ'] = 'Asia/Tokyo'
-if hasattr(time, 'tzset'):
-    time.tzset()
-
 import pandas as pd
 from dotenv import load_dotenv
 from playwright.sync_api import sync_playwright
+
+# --- ★タイムゾーンを日本時間(JST)に固定 ---
+os.environ['TZ'] = 'Asia/Tokyo'
+if hasattr(time, 'tzset'):
+    time.tzset()
 
 def ensure_playwright_installed():
     try:
@@ -46,8 +44,6 @@ TARGET_STORES = [
     "おにぎり維心 五反田店",
     "おにぎり維心 中目黒店"
 ]
-
-STORE_SELECT_URL = "https://airregi.jp/CLP/view/displayPlfSettingStoreSelect/?transitionUrl=https%3A%2F%2Fairregi.jp%2FCLP%2Fview%2Ftop%2F"
 
 def auto_login(page):
     page.goto("https://airregi.jp/CLP/view/top/", wait_until="domcontentloaded")
@@ -112,25 +108,11 @@ def auto_login(page):
         for _ in range(25):
             page.wait_for_timeout(1000)
             if "choose-store" in page.url or page.locator("text='店舗を選択'").first.is_visible() or page.locator("text='利用する店舗を選択'").first.is_visible():
-                print("・店舗選択画面（choose-store）を検知しました。対象店舗を選択して進みます...")
+                print("・初期の店舗選択画面を検知。最初の店舗を選択します...")
                 page.wait_for_timeout(1500)
-                
-                clicked = False
-                for s_name in TARGET_STORES:
-                    loc = page.locator(f"text='{s_name}'").first
-                    if loc.is_visible():
-                        loc.click()
-                        clicked = True
-                        break
-                
-                if not clicked:
-                    candidate = page.locator("a:visible, button:visible").filter(has_text="店").first
-                    if candidate.is_visible():
-                        candidate.click()
-                    else:
-                        first_store_link = page.locator("ul li a:visible, main a:visible").first
-                        if first_store_link.is_visible():
-                            first_store_link.click()
+                first_store_link = page.locator("ul li a:visible, main a:visible").first
+                if first_store_link.is_visible():
+                    first_store_link.click()
                 page.wait_for_timeout(3500)
 
             if "airregi.jp" in page.url and "connect.airregi.jp" not in page.url:
@@ -139,126 +121,110 @@ def auto_login(page):
         if "connect.airregi.jp" in page.url and "choose-store" not in page.url:
             raise RuntimeError(f"【ログイン未完了】画面遷移が完了しませんでした。URL: {page.url}")
 
+        print("・ログイン完了")
         page.wait_for_timeout(3000)
 
-def select_store(page, store_name, is_first_store=False):
+def select_store_and_navigate(page, store_name):
     print(f"\n--- 【店舗切り替え】「{store_name}」へ移動 ---")
-    short_kw = ""
-    for k in ["三田", "恵比寿", "五反田", "中目黒"]:
-        if k in store_name:
-            short_kw = k
-            break
+    
+    # 1. 確実に店舗選択URLへ遷移し、選択後は日別売上画面へ自動リダイレクトさせる
+    url = "https://airregi.jp/CLP/view/displayPlfSettingStoreSelect/?transitionUrl=https%3A%2F%2Fairregi.jp%2FCLP%2Fview%2Fsales%2Fdaily%2F"
+    page.goto(url, wait_until="domcontentloaded")
+    page.wait_for_timeout(2500)
 
-    if is_first_store:
-        try:
-            if page.locator(f"text='{short_kw}'").first.is_visible():
-                return
-        except Exception:
-            pass
-
-    switch_link = page.locator("a[href*='displayPlfSettingStoreSelect']").first
-    if switch_link.count() > 0:
-        try:
-            switch_link.click(force=True)
-            page.wait_for_timeout(2500)
-        except Exception:
-            page.goto(STORE_SELECT_URL, wait_until="domcontentloaded")
-            page.wait_for_timeout(2500)
-    else:
-        page.goto(STORE_SELECT_URL, wait_until="domcontentloaded")
-        page.wait_for_timeout(2500)
-
-    target = page.locator(f":is(a, button, li, tr, div):has-text('{short_kw}')").filter(has_text="店").first
-    if not target.is_visible():
-        target = page.locator(f"text='{short_kw}'").first
-
-    try:
-        target.wait_for(state="visible", timeout=15000)
-        target.click(force=True)
-    except Exception:
-        page.evaluate("""(kw) => {
-            const all = Array.from(document.querySelectorAll('a, button, li, tr, div, span'));
-            for (let el of all) {
-                if ((el.innerText || '').trim().includes(kw)) {
+    # 2. 店舗名のスペースを無視して完全に一致する要素をクリック
+    clicked = page.evaluate("""(name) => {
+        const elems = Array.from(document.querySelectorAll('a, button, li, div, p, span'));
+        const target = name.replace(/\\s+/g, '');
+        for (let el of elems) {
+            const txt = (el.innerText || '').trim().replace(/\\s+/g, '');
+            if (txt === target) {
+                const rect = el.getBoundingClientRect();
+                if (rect.width > 0 && rect.height > 0) {
                     el.click();
                     return true;
                 }
             }
-        }""", short_kw)
-
-    page.wait_for_timeout(3500)
-
-def navigate_to_sales_page(page):
-    page.wait_for_timeout(2000)
-    if page.locator("button:has-text('表示する'), button:has-text('表示')").first.is_visible():
-        return
-    try:
-        sales_menu = page.locator("text='売上・分析'").first
-        sales_menu.wait_for(state="visible", timeout=10000)
-        if not page.locator("text='日別売上'").first.is_visible():
-            sales_menu.click()
-            page.wait_for_timeout(1500)
-        
-        daily_btn = page.locator("text='日別売上'").first
-        daily_btn.wait_for(state="visible", timeout=10000)
-        daily_btn.click()
+        }
+        return false;
+    }""", store_name)
+    
+    # 3. 万が一見つからない場合のフォールバック
+    if not clicked:
+        short_kw = "三田" if "三田" in store_name else ("恵比寿" if "恵比寿" in store_name else ("五反田" if "五反田" in store_name else "中目黒"))
+        loc = page.locator(f"text='{short_kw}'").first
+        if loc.is_visible():
+            loc.click()
+    
+    # 4. クリック後の画面遷移を待機
+    page.wait_for_timeout(4000)
+    
+    # 5. リダイレクトが失敗した場合は手動で日別売上画面へ移動
+    if "sales/daily" not in page.url:
+        page.goto("https://airregi.jp/CLP/view/sales/daily/", wait_until="domcontentloaded")
         page.wait_for_timeout(3000)
-    except Exception:
-        pass
+    
+    print(f"・「{store_name}」の日別売上画面に到着")
 
 def extract_sales_for_date(page, target_date):
     dt = datetime.strptime(target_date, "%Y-%m-%d")
     year_str, month_str, day_str = f"{dt.year}年", f"{dt.month}月", f"{dt.day}日"
+    day_num_str = f"{dt.day}日"
 
-    print(f"・ {target_date} を指定中...")
-    page.wait_for_timeout(1000)
+    print(f"・ {target_date} のデータを抽出中...")
 
-    # 1. Playwrightネイティブによる確実なプルダウン選択
+    # 1. 集計対象を「時間別」に設定
     try:
-        selects = page.locator("select").all()
-        if len(selects) >= 4:
-            selects[0].select_option(label="時間別")
-            selects[1].select_option(label=year_str)
-            selects[2].select_option(label=month_str)
-            
-            # 日の選択（"14日" または "14"）
-            day_opts = selects[3].locator("option").all_inner_texts()
-            opts_clean = [o.strip() for o in day_opts]
-            if day_str in opts_clean:
-                selects[3].select_option(label=day_str)
-            else:
-                selects[3].select_option(label=str(dt.day))
-    except Exception as e:
-        print(f"・プルダウン設定スキップ: {e}")
+        page.evaluate("""() => {
+            const selects = Array.from(document.querySelectorAll('select'));
+            for (let sel of selects) {
+                for (let opt of sel.options) {
+                    if (opt.text.includes('時間別')) {
+                        sel.value = opt.value;
+                        sel.dispatchEvent(new Event('change', { bubbles: true }));
+                        break;
+                    }
+                }
+            }
+        }""")
+    except Exception:
+        pass
 
     page.wait_for_timeout(1000)
 
-    # 2. フライング抽出を防止する「テーブル確実更新待機」ロジック
-    btn = page.locator("button:has-text('表示する'), button:has-text('表示')").first
+    # 2. 日付を設定
+    page.evaluate("""({ yearStr, monthStr, dayNumStr }) => {
+        const selects = Array.from(document.querySelectorAll('select'));
+        for (let sel of selects) {
+            for (let opt of sel.options) {
+                let t = opt.text.trim();
+                if (t === yearStr || t === monthStr || t === dayNumStr || t === String(parseInt(dayNumStr))) {
+                    sel.value = opt.value;
+                    sel.dispatchEvent(new Event('change', { bubbles: true }));
+                }
+            }
+        }
+    }""", {"yearStr": year_str, "monthStr": month_str, "dayNumStr": day_num_str})
+
+    page.wait_for_timeout(1000)
+
+    # 3. 「表示する」ボタンをクリックし、固定で5秒待機（フライング防止）
+    btn = page.locator("button:has-text('表示する'), button:has-text('表示'), input[value*='表示']").first
     if btn.is_visible():
-        # クリック前のテーブルの状態を記憶
-        before_table = page.locator("table").first.inner_html() if page.locator("table").first.is_visible() else ""
-        
         btn.click(force=True)
-        print("・「表示する」ボタンを押下しました。更新を待機します...")
-        
-        # テーブルが確実に書き換わるまで最大10秒待つ
-        for _ in range(10):
-            page.wait_for_timeout(1000)
-            after_table = page.locator("table").first.inner_html() if page.locator("table").first.is_visible() else ""
-            if before_table != after_table:
-                break
-        page.wait_for_timeout(2000)
+        print("・「表示する」ボタンを押下しました。Airレジの読込完了を待機中...")
+        page.wait_for_timeout(5000)
 
-    # 3. 「時間帯別表示」ボタンを念のためクリック
+    # 4. 「時間帯別表示」ボタンをクリック
     try:
-        slot_btn = page.locator("button:has-text('時間帯別表示'), a:has-text('時間帯別表示')").first
+        slot_btn = page.locator("button:has-text('時間帯別表示'), [role='tab']:has-text('時間帯別表示')").first
         if slot_btn.is_visible():
             slot_btn.click(force=True)
             page.wait_for_timeout(2000)
     except Exception:
         pass
 
+    # 5. 行の抽出
     rows = page.locator("table tr").all()
     store_rows = []
     for row in rows:
@@ -267,6 +233,7 @@ def extract_sales_for_date(page, target_date):
         if any(row_text):
             store_rows.append(row_text)
 
+    print(f"・抽出完了: {len(store_rows)} 行")
     return store_rows
 
 def main():
@@ -320,12 +287,8 @@ def main():
                 print(f"\n--- 【処理日】 {target_date} ---")
                 all_stores_data = []
 
-                for index, store_name in enumerate(TARGET_STORES):
-                    is_first = (index == 0)
-                    select_store(page, store_name, is_first_store=is_first)
-                    
-                    navigate_to_sales_page(page)
-
+                for store_name in TARGET_STORES:
+                    select_store_and_navigate(page, store_name)
                     store_rows = extract_sales_for_date(page, target_date)
                     for r in store_rows:
                         all_stores_data.append([store_name] + r)
