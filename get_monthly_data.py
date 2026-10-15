@@ -43,6 +43,8 @@ TARGET_STORES = [
     "おにぎり維心 中目黒店"
 ]
 
+STORE_SELECT_URL = "https://airregi.jp/CLP/view/displayPlfSettingStoreSelect/?transitionUrl=https%3A%2F%2Fairregi.jp%2FCLP%2Fview%2Ftop%2F"
+
 def auto_login(page):
     page.goto("https://airregi.jp/CLP/view/top/", wait_until="domcontentloaded")
     page.wait_for_timeout(3000)
@@ -156,49 +158,64 @@ def select_store(page, store_name, is_first_store=False):
             short_kw = k
             break
 
-    if page.locator("text='利用する店舗を選択'").is_visible() or page.locator("text='店舗を選択'").is_visible():
-        target = page.locator(f"text='{store_name}'").or_(page.get_by_text(short_kw)).first
-        target.wait_for(state="visible", timeout=15000)
-        target.click()
-        page.wait_for_timeout(4000)
-        return
-
+    # 1店舗目で既にその店舗が表示されている場合はスキップ
     if is_first_store:
         try:
-            page.wait_for_selector(f"text='{short_kw}'", timeout=4000)
-            print(f"・1店舗目「{store_name}」は既に選択済みです。")
-            return
+            if page.locator(f"text='{short_kw}'").first.is_visible():
+                print(f"・1店舗目「{store_name}」は既に選択済みです。")
+                return
         except Exception:
             pass
 
-    store_trigger = page.locator("header button, header a, div[class*='shop'], div[class*='Header']").filter(has_text="店").first
-    if not store_trigger.is_visible():
-        store_trigger = page.get_by_text("三田おにぎり").or_(page.get_by_text("おにぎり維心")).first
+    # 店舗選択画面へ直接遷移（非表示リンクのforceクリック、またはURL直接ジャンプ）
+    print("・店舗選択画面へ移動中...")
+    switch_link = page.locator("a[href*='displayPlfSettingStoreSelect']").first
+    if switch_link.count() > 0:
+        try:
+            switch_link.click(force=True)
+            page.wait_for_timeout(2500)
+        except Exception:
+            page.goto(STORE_SELECT_URL, wait_until="domcontentloaded")
+            page.wait_for_timeout(2500)
+    else:
+        page.goto(STORE_SELECT_URL, wait_until="domcontentloaded")
+        page.wait_for_timeout(2500)
 
-    store_trigger.wait_for(state="visible", timeout=15000)
-    store_trigger.click()
-    page.wait_for_timeout(1500)
-
-    switch_btn = page.locator("text='店舗切り替え'").or_(page.locator("text='店舗切替'")).first
-    switch_btn.wait_for(state="visible", timeout=10000)
-    switch_btn.click()
-    page.wait_for_timeout(2500)
-
-    store_target = (
-        page.locator(f"text='{store_name}'")
-        .or_(page.locator(f"text='{store_name.replace(' ', ' ')}'"))
-        .or_(page.locator(f":is(a, button, li, div, span):has-text('{short_kw}')"))
+    # 店舗選択画面で対象店舗をクリック
+    print(f"・店舗一覧から「{store_name}」({short_kw}) を選択中...")
+    target = (
+        page.locator(f":is(a, button, li, tr, div):has-text('{short_kw}')")
+        .filter(has_text="店")
         .first
     )
-    store_target.wait_for(state="visible", timeout=15000)
-    store_target.click()
-    page.wait_for_timeout(4000)
+    if not target.is_visible():
+        target = page.locator(f"text='{short_kw}'").first
+
+    try:
+        target.wait_for(state="visible", timeout=15000)
+        target.click(force=True)
+    except Exception:
+        # 万が一見つからない場合はJavaScriptで全要素から走査してクリック
+        clicked = page.evaluate("""(kw) => {
+            const all = Array.from(document.querySelectorAll('a, button, li, tr, div, span'));
+            for (let el of all) {
+                const txt = (el.innerText || '').trim();
+                if (txt.includes(kw)) {
+                    el.click();
+                    return true;
+                }
+            }
+            return false;
+        }""", short_kw)
+        if not clicked:
+            raise RuntimeError(f"店舗選択画面で「{store_name}」({short_kw}) が見つかりませんでした。")
+
+    page.wait_for_timeout(3500)
     print(f"・「{store_name}」への切り替え完了")
 
 def navigate_to_sales_page(page):
     """確実に日別売上ページへ遷移する"""
-    current_url = page.url
-    if "view/sales/daily" not in current_url:
+    if "view/sales/daily" not in page.url:
         print("・日別売上画面へURL遷移中...")
         page.goto("https://airregi.jp/CLP/view/sales/daily/", wait_until="domcontentloaded")
         page.wait_for_timeout(3000)
@@ -247,14 +264,8 @@ def extract_sales_for_date(page, target_date):
     btn = page.locator("button:has-text('表示する'), button:has-text('表示'), input[value*='表示']").first
     if btn.is_visible():
         btn.click(force=True)
-        print("・「表示する」ボタンを押下しました。テーブル読み込みを待機します...")
-
-    # テーブル（またはデータ行）が描画されるまで確実に待機（最大15秒）
-    try:
-        page.wait_for_selector("table tbody tr, table tr", timeout=15000)
-        page.wait_for_timeout(2000)
-    except Exception:
-        print("・テーブル行の待機がタイムアウトしました。現在の行を抽出します。")
+        print("・「表示する」ボタンを押下。データ読み込みを待機中...")
+        page.wait_for_timeout(4000)
 
     rows = page.locator("table tr").all()
     store_rows = []
@@ -326,9 +337,8 @@ def main():
                     for r in store_rows:
                         all_stores_data.append([store_name] + r)
 
-                # 空抽出の検知ガード
                 if not all_stores_data:
-                    raise RuntimeError(f"【データ取得失敗】{target_date} の売上テーブルからデータを1件も抽出できませんでした。Airレジの画面状態を確認してください。")
+                    raise RuntimeError(f"【データ取得失敗】{target_date} の売上テーブルからデータを1件も抽出できませんでした。")
 
                 df = pd.DataFrame(all_stores_data)
                 csv_path = os.path.join(OUTPUT_DIR, f"4店舗_時間別売上_{target_date}.csv")
