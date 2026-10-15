@@ -1,18 +1,41 @@
 import os
 import sys
 import time
+import platform
+import subprocess
 from datetime import datetime, timedelta
 import pandas as pd
 from dotenv import load_dotenv
 from playwright.sync_api import sync_playwright
 
+# --- 1. Chromiumブラウザの自動インストール（未導入環境対策） ---
+def ensure_playwright_installed():
+    try:
+        # クラウド環境や未インストール環境向けに自動セットアップ
+        subprocess.run([sys.executable, "-m", "playwright", "install", "chromium"], check=True)
+    except Exception as e:
+        print(f"Playwright browser check warning: {e}")
+
+ensure_playwright_installed()
+
+# --- 2. 認証情報の読み込み（.env および Streamlit Secrets の両対応） ---
 load_dotenv()
 AIRREGI_ID = os.getenv("AIRREGI_ID")
 AIRREGI_PASS = os.getenv("AIRREGI_PASS")
 
+# Streamlit Cloud環境の場合、secretsからの読み込みも試行
+if not AIRREGI_ID or not AIRREGI_PASS:
+    try:
+        import streamlit as st
+        if hasattr(st, "secrets"):
+            AIRREGI_ID = AIRREGI_ID or st.secrets.get("AIRREGI_ID")
+            AIRREGI_PASS = AIRREGI_PASS or st.secrets.get("AIRREGI_PASS")
+    except Exception:
+        pass
+
 OUTPUT_DIR = os.path.abspath("./output")
 os.makedirs(OUTPUT_DIR, exist_ok=True)
-USER_DATA_DIR = "./user_data"
+USER_DATA_DIR = os.path.abspath("./user_data")
 
 TARGET_STORES = [
     "三田おにぎり 本店",
@@ -23,25 +46,41 @@ TARGET_STORES = [
 
 def auto_login(page):
     page.goto("https://airregi.jp/CLP/view/top/")
-    page.wait_for_timeout(2000)
+    page.wait_for_timeout(3000)
     
+    # ログイン画面またはログインボタンが表示されているか判定
     if "login" in page.url or page.locator("input[name='account']").is_visible() or page.get_by_role("button", name="ログイン").is_visible():
-        print("・ログイン処理を自動実行中...")
+        print("・ログイン画面を検知。自動ログイン処理を実行します...")
+        
+        if not AIRREGI_ID or not AIRREGI_PASS:
+            raise ValueError("【認証エラー】AIRREGI_ID または AIRREGI_PASS が設定されていません。環境変数またはStreamlit Secretsをご確認ください。")
+
         if page.get_by_role("button", name="ログイン").is_visible() and "login" not in page.url:
             page.get_by_role("button", name="ログイン").click()
             page.wait_for_timeout(2000)
 
+        # ID入力
         id_input = page.locator("input[name='account'], input[name='loginId'], input[type='text']").first
-        if id_input.is_visible():
-            id_input.fill(AIRREGI_ID)
+        id_input.wait_for(state="visible", timeout=15000)
+        id_input.fill(AIRREGI_ID)
         
+        # パスワード入力
         pass_input = page.locator("input[name='password'], input[type='password']").first
-        if pass_input.is_visible():
-            pass_input.fill(AIRREGI_PASS)
+        pass_input.wait_for(state="visible", timeout=15000)
+        pass_input.fill(AIRREGI_PASS)
 
+        # 「次回から入力を省略」にチェックを入れる
+        try:
+            checkbox = page.locator("input[type='checkbox']").first
+            if checkbox.is_visible() and not checkbox.is_checked():
+                checkbox.check()
+        except Exception:
+            pass
+
+        # ログインボタン押下
         login_btn = page.locator("button[type='submit'], input[type='submit'], button:has-text('ログイン')").first
         login_btn.click()
-        page.wait_for_timeout(3000)
+        page.wait_for_timeout(5000)
 
 def select_store(page, store_name, is_first_store=False):
     print(f"\n--- 【店舗切り替え】「{store_name}」へ移動 ---")
@@ -104,21 +143,18 @@ def extract_sales_for_date(page, target_date):
     except Exception:
         pass
 
-    # 日付のプルダウン操作（標準selectおよびカスタム要素へのフォールバック）
-    success = page.evaluate("""({ yearStr, monthStr, dayNumStr }) => {
+    # 日付プルダウン操作
+    page.evaluate("""({ yearStr, monthStr, dayNumStr }) => {
         const selects = Array.from(document.querySelectorAll('select'));
-        let changed = false;
         for (let sel of selects) {
             for (let opt of sel.options) {
                 let t = opt.text.trim();
                 if (t === yearStr || t === monthStr || t === dayNumStr || t === String(parseInt(dayNumStr))) {
                     sel.value = opt.value;
                     sel.dispatchEvent(new Event('change', { bubbles: true }));
-                    changed = true;
                 }
             }
         }
-        return changed;
     }""", {"yearStr": year_str, "monthStr": month_str, "dayNumStr": day_num_str})
 
     page.wait_for_timeout(1000)
@@ -161,11 +197,23 @@ def main():
 
     print(f"=== 対象期間: {start_date_str} 〜 {end_date_str} ({len(date_list)}日間) ===")
 
+    # クラウド環境（Linux）かローカルPC（Windows/Mac）かを自動判定
+    is_cloud = (platform.system() == "Linux")
+    run_headless = True if is_cloud else False
+    
+    launch_args = ["--start-maximized"]
+    if is_cloud:
+        launch_args.extend([
+            "--no-sandbox",
+            "--disable-dev-shm-usage",
+            "--disable-gpu"
+        ])
+
     with sync_playwright() as p:
         context = p.chromium.launch_persistent_context(
             user_data_dir=USER_DATA_DIR,
-            headless=False,
-            args=["--start-maximized"]
+            headless=run_headless,
+            args=launch_args
         )
         page = context.new_page()
 
@@ -201,6 +249,7 @@ def main():
 
         except Exception as e:
             print(f"[ERROR] 処理中にエラーが発生しました: {e}")
+            raise e
         finally:
             context.close()
 
