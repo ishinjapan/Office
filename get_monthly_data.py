@@ -158,10 +158,16 @@ def select_store(page, store_name, is_first_store=False):
             short_kw = k
             break
 
-    # --- 三田本店の店舗切り替えスキップを廃止（確実に切り替える） ---
-    # if is_first_store:
-    #     ...
+    # 1店舗目で既にその店舗が表示されている場合はスキップ
+    if is_first_store:
+        try:
+            if page.locator(f"text='{short_kw}'").first.is_visible():
+                print(f"・1店舗目「{store_name}」は既に選択済みです。")
+                return
+        except Exception:
+            pass
 
+    # 店舗選択画面へ遷移
     print("・店舗選択画面へ移動中...")
     switch_link = page.locator("a[href*='displayPlfSettingStoreSelect']").first
     if switch_link.count() > 0:
@@ -175,6 +181,7 @@ def select_store(page, store_name, is_first_store=False):
         page.goto(STORE_SELECT_URL, wait_until="domcontentloaded")
         page.wait_for_timeout(2500)
 
+    # 店舗選択画面で対象店舗をクリック
     print(f"・店舗一覧から「{store_name}」({short_kw}) を選択中...")
     target = (
         page.locator(f":is(a, button, li, tr, div):has-text('{short_kw}')")
@@ -206,13 +213,16 @@ def select_store(page, store_name, is_first_store=False):
     print(f"・「{store_name}」への切り替え完了")
 
 def navigate_to_sales_page(page):
+    """「売上・分析」メニューを展開して確実に日別売上ページへ移動する"""
     print("・日別売上画面へ移動中...")
     page.wait_for_timeout(2000)
 
+    # 既に日別売上画面に滞在している場合
     if page.locator("button:has-text('表示する'), button:has-text('表示')").first.is_visible():
         print("・既に日別売上画面に滞在しています。")
         return
 
+    # 「売上・分析」メニューを展開
     try:
         sales_menu = page.locator("text='売上・分析'").first
         sales_menu.wait_for(state="visible", timeout=15000)
@@ -222,6 +232,7 @@ def navigate_to_sales_page(page):
     except Exception as e:
         print(f"・メニュー待機エラー: {e}")
 
+    # 「日別売上」をクリック
     try:
         daily_btn = page.locator("text='日別売上'").first
         daily_btn.wait_for(state="visible", timeout=15000)
@@ -240,6 +251,7 @@ def navigate_to_sales_page(page):
         }""")
         page.wait_for_timeout(3000)
 
+    # 画面描画の確認
     try:
         page.wait_for_selector("button:has-text('表示する'), button:has-text('表示'), select", timeout=15000)
         print("・日別売上画面の読み込み完了を確認")
@@ -254,6 +266,7 @@ def extract_sales_for_date(page, target_date):
     print(f"・ {target_date} ({year_str} {month_str} {day_num_str}) のデータを指定中...")
     page.wait_for_timeout(1000)
 
+    # 集計対象を「時間別」に切り替え
     try:
         page.evaluate("""() => {
             const selects = Array.from(document.querySelectorAll('select'));
@@ -271,6 +284,7 @@ def extract_sales_for_date(page, target_date):
     except Exception:
         pass
 
+    # 日付プルダウンの選択
     page.evaluate("""({ yearStr, monthStr, dayNumStr }) => {
         const selects = Array.from(document.querySelectorAll('select'));
         for (let sel of selects) {
@@ -283,16 +297,16 @@ def extract_sales_for_date(page, target_date):
             }
         }
     }""", {"yearStr": year_str, "monthStr": month_str, "dayNumStr": day_num_str})
-    
     page.wait_for_timeout(1000)
 
+    # 「表示する」ボタンをクリック
     btn = page.locator("button:has-text('表示する'), button:has-text('表示'), input[value*='表示']").first
     if btn.is_visible():
         btn.click(force=True)
         print("・「表示する」ボタンを押下。データ読み込みを待機中...")
-        # --- 抽出前に確実にテーブルが更新されるのを待つ（3.5秒 → 5秒） ---
-        page.wait_for_timeout(5000)
+        page.wait_for_timeout(4000)
 
+    # テーブル行の描画待機
     try:
         page.wait_for_selector("table tbody tr, table tr", timeout=15000)
         page.wait_for_timeout(2000)
@@ -344,7 +358,6 @@ def main():
         ])
 
     with sync_playwright() as p:
-        # タイムゾーンの固定を解除し、元のベース設定に戻しました
         context = p.chromium.launch_persistent_context(
             user_data_dir=USER_DATA_DIR,
             headless=run_headless,
