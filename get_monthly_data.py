@@ -167,7 +167,7 @@ def select_store(page, store_name, is_first_store=False):
         except Exception:
             pass
 
-    # 店舗選択画面へ直接遷移（非表示リンクのforceクリック、またはURL直接ジャンプ）
+    # 店舗選択画面へ遷移
     print("・店舗選択画面へ移動中...")
     switch_link = page.locator("a[href*='displayPlfSettingStoreSelect']").first
     if switch_link.count() > 0:
@@ -195,7 +195,6 @@ def select_store(page, store_name, is_first_store=False):
         target.wait_for(state="visible", timeout=15000)
         target.click(force=True)
     except Exception:
-        # 万が一見つからない場合はJavaScriptで全要素から走査してクリック
         clicked = page.evaluate("""(kw) => {
             const all = Array.from(document.querySelectorAll('a, button, li, tr, div, span'));
             for (let el of all) {
@@ -214,11 +213,50 @@ def select_store(page, store_name, is_first_store=False):
     print(f"・「{store_name}」への切り替え完了")
 
 def navigate_to_sales_page(page):
-    """確実に日別売上ページへ遷移する"""
-    if "view/sales/daily" not in page.url:
-        print("・日別売上画面へURL遷移中...")
-        page.goto("https://airregi.jp/CLP/view/sales/daily/", wait_until="domcontentloaded")
+    """「売上・分析」メニューを展開して確実に日別売上ページへ移動する"""
+    print("・日別売上画面へ移動中...")
+    page.wait_for_timeout(2000)
+
+    # 既に日別売上画面に滞在している場合
+    if page.locator("button:has-text('表示する'), button:has-text('表示')").first.is_visible():
+        print("・既に日別売上画面に滞在しています。")
+        return
+
+    # 「売上・分析」メニューを展開
+    try:
+        sales_menu = page.locator("text='売上・分析'").first
+        sales_menu.wait_for(state="visible", timeout=15000)
+        if not page.locator("text='日別売上'").first.is_visible():
+            sales_menu.click()
+            page.wait_for_timeout(1500)
+    except Exception as e:
+        print(f"・メニュー待機エラー: {e}")
+
+    # 「日別売上」をクリック
+    try:
+        daily_btn = page.locator("text='日別売上'").first
+        daily_btn.wait_for(state="visible", timeout=15000)
+        daily_btn.click()
         page.wait_for_timeout(3000)
+    except Exception:
+        page.evaluate("""() => {
+            const all = Array.from(document.querySelectorAll('a, button, span, li, div'));
+            for (let el of all) {
+                if ((el.innerText || '').trim() === '日別売上') {
+                    el.click();
+                    return true;
+                }
+            }
+            return false;
+        }""")
+        page.wait_for_timeout(3000)
+
+    # 画面描画の確認
+    try:
+        page.wait_for_selector("button:has-text('表示する'), button:has-text('表示'), select", timeout=15000)
+        print("・日別売上画面の読み込み完了を確認")
+    except Exception:
+        print(f"・日別売上画面の読み込み待機タイムアウト (URL: {page.url})")
 
 def extract_sales_for_date(page, target_date):
     dt = datetime.strptime(target_date, "%Y-%m-%d")
@@ -226,6 +264,7 @@ def extract_sales_for_date(page, target_date):
     day_num_str = f"{dt.day}日"
 
     print(f"・ {target_date} ({year_str} {month_str} {day_num_str}) のデータを指定中...")
+    page.wait_for_timeout(1000)
 
     # 集計対象を「時間別」に切り替え
     try:
@@ -241,6 +280,7 @@ def extract_sales_for_date(page, target_date):
                 }
             }
         }""")
+        page.wait_for_timeout(1000)
     except Exception:
         pass
 
@@ -257,7 +297,6 @@ def extract_sales_for_date(page, target_date):
             }
         }
     }""", {"yearStr": year_str, "monthStr": month_str, "dayNumStr": day_num_str})
-
     page.wait_for_timeout(1000)
 
     # 「表示する」ボタンをクリック
@@ -267,6 +306,13 @@ def extract_sales_for_date(page, target_date):
         print("・「表示する」ボタンを押下。データ読み込みを待機中...")
         page.wait_for_timeout(4000)
 
+    # テーブル行の描画待機
+    try:
+        page.wait_for_selector("table tbody tr, table tr", timeout=15000)
+        page.wait_for_timeout(2000)
+    except Exception:
+        pass
+
     rows = page.locator("table tr").all()
     store_rows = []
     for row in rows:
@@ -275,7 +321,7 @@ def extract_sales_for_date(page, target_date):
         if any(row_text):
             store_rows.append(row_text)
 
-    print(f"・抽出行数: {len(store_rows)} 行")
+    print(f"・抽出行数: {len(store_rows)} 行 (現在のURL: {page.url})")
     return store_rows
 
 def main():
@@ -338,7 +384,7 @@ def main():
                         all_stores_data.append([store_name] + r)
 
                 if not all_stores_data:
-                    raise RuntimeError(f"【データ取得失敗】{target_date} の売上テーブルからデータを1件も抽出できませんでした。")
+                    raise RuntimeError(f"【データ取得失敗】{target_date} の売上テーブルからデータを1件も抽出できませんでした。現在のURL: {page.url}")
 
                 df = pd.DataFrame(all_stores_data)
                 csv_path = os.path.join(OUTPUT_DIR, f"4店舗_時間別売上_{target_date}.csv")
