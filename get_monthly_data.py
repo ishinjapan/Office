@@ -109,26 +109,17 @@ def auto_login(page):
             page.wait_for_timeout(1000)
 
             if "choose-store" in page.url or page.locator("text='店舗を選択'").first.is_visible() or page.locator("text='利用する店舗を選択'").first.is_visible():
-                print("・店舗選択画面（choose-store）を検知しました。対象店舗を選択して進みます...")
+                print("・店舗選択画面（choose-store）を検知しました。")
                 page.wait_for_timeout(1500)
                 
-                clicked = False
-                for s_name in TARGET_STORES:
-                    loc = page.locator(f"text='{s_name}'").first
-                    if loc.is_visible():
-                        loc.click()
-                        clicked = True
-                        break
-                
-                if not clicked:
-                    candidate = page.locator("a:visible, button:visible").filter(has_text="店").first
-                    if candidate.is_visible():
-                        candidate.click()
-                    else:
-                        first_store_link = page.locator("ul li a:visible, main a:visible").first
-                        if first_store_link.is_visible():
-                            first_store_link.click()
-                
+                # 最初は1店舗目（三田おにぎり 本店）を確実に選択
+                loc = page.locator(f"text='三田おにぎり 本店'").or_(page.locator("text='三田'")).first
+                if loc.is_visible():
+                    loc.click()
+                else:
+                    first_link = page.locator("ul li a:visible, main a:visible").first
+                    if first_link.is_visible():
+                        first_link.click()
                 page.wait_for_timeout(3500)
 
             if "airregi.jp" in page.url and "connect.airregi.jp" not in page.url:
@@ -149,7 +140,7 @@ def auto_login(page):
         print(f"・Airレジへのログイン成功を確認（現在のURL: {page.url}）")
         page.wait_for_timeout(3000)
 
-def select_store(page, store_name, is_first_store=False):
+def select_store(page, store_name):
     print(f"\n--- 【店舗切り替え】「{store_name}」へ移動 ---")
     
     short_kw = ""
@@ -158,14 +149,7 @@ def select_store(page, store_name, is_first_store=False):
             short_kw = k
             break
 
-    if is_first_store:
-        try:
-            if page.locator(f"text='{short_kw}'").first.is_visible():
-                print(f"・1店舗目「{store_name}」は既に選択済みです。")
-                return
-        except Exception:
-            pass
-
+    # 全店舗で確実に店舗選択画面へアクセスして切り替える
     print("・店舗選択画面へ移動中...")
     switch_link = page.locator("a[href*='displayPlfSettingStoreSelect']").first
     if switch_link.count() > 0:
@@ -213,10 +197,6 @@ def navigate_to_sales_page(page):
     """「売上・分析」メニューを展開して確実に日別売上ページへ移動する"""
     print("・日別売上画面へ移動中...")
     page.wait_for_timeout(2000)
-
-    if page.locator("button:has-text('表示する'), button:has-text('表示')").first.is_visible():
-        print("・既に日別売上画面に滞在しています。")
-        return
 
     try:
         sales_menu = page.locator("text='売上・分析'").first
@@ -299,29 +279,7 @@ def extract_sales_for_date(page, target_date):
         print("・「表示する」ボタンを押下。データ読み込みを待機中...")
         page.wait_for_timeout(4000)
 
-    # 4. 「時間帯別表示」ボタンを明示的に選択（早番・中番・遅番の表に固定）
-    try:
-        slot_view_btn = page.locator("button:has-text('時間帯別表示'), a:has-text('時間帯別表示'), [role='tab']:has-text('時間帯別表示')").first
-        if slot_view_btn.is_visible():
-            print("・「時間帯別表示」ボタンをクリックして切り替えます...")
-            slot_view_btn.click(force=True)
-            page.wait_for_timeout(3000)
-        else:
-            page.evaluate("""() => {
-                const elems = Array.from(document.querySelectorAll('button, a, span, div, li'));
-                for (let el of elems) {
-                    if ((el.innerText || '').trim() === '時間帯別表示') {
-                        el.click();
-                        return true;
-                    }
-                }
-                return false;
-            }""")
-            page.wait_for_timeout(3000)
-    except Exception as e:
-        print(f"・時間帯別表示ボタンの選択スキップ: {e}")
-
-    # 5. テーブル行の描画待機と抽出
+    # 4. テーブル行の描画待機と抽出
     try:
         page.wait_for_selector("table tbody tr, table tr", timeout=15000)
         page.wait_for_timeout(2000)
@@ -373,7 +331,6 @@ def main():
         ])
 
     with sync_playwright() as p:
-        # 日本標準時（Asia/Tokyo）と日本語ロケールを明示的に指定して起動
         context = p.chromium.launch_persistent_context(
             user_data_dir=USER_DATA_DIR,
             headless=run_headless,
@@ -392,8 +349,8 @@ def main():
                 all_stores_data = []
 
                 for index, store_name in enumerate(TARGET_STORES):
-                    is_first = (index == 0)
-                    select_store(page, store_name, is_first_store=is_first)
+                    # 1店舗目も含め、全店舗で明示的に店舗選択を実施
+                    select_store(page, store_name)
                     
                     navigate_to_sales_page(page)
 
