@@ -3,17 +3,18 @@ import sys
 import time
 import platform
 import subprocess
+import re
 from datetime import datetime, timedelta
 import pandas as pd
 from dotenv import load_dotenv
 from playwright.sync_api import sync_playwright
 
-# --- Cloud向け必須設定：タイムゾーンを日本時間に固定 ---
+# --- 最小修正1: タイムゾーンを日本時間(JST)に固定 ---
 os.environ['TZ'] = 'Asia/Tokyo'
 if hasattr(time, 'tzset'):
     time.tzset()
 
-# --- Cloud向け必須設定：Chromiumブラウザの自動インストール ---
+# --- Chromiumブラウザの自動インストール ---
 def ensure_playwright_installed():
     try:
         subprocess.run([sys.executable, "-m", "playwright", "install", "chromium"], check=True)
@@ -22,11 +23,11 @@ def ensure_playwright_installed():
 
 ensure_playwright_installed()
 
+# --- 認証情報の読み込み ---
 load_dotenv()
 AIRREGI_ID = os.getenv("AIRREGI_ID")
 AIRREGI_PASS = os.getenv("AIRREGI_PASS")
 
-# --- Cloud向け必須設定：Secretsからの認証読み込み ---
 if not AIRREGI_ID or not AIRREGI_PASS:
     try:
         import streamlit as st
@@ -47,26 +48,110 @@ TARGET_STORES = [
     "おにぎり維心 中目黒店"
 ]
 
+STORE_SELECT_URL = "https://airregi.jp/CLP/view/displayPlfSettingStoreSelect/?transitionUrl=https%3A%2F%2Fairregi.jp%2FCLP%2Fview%2Ftop%2F"
+
 def auto_login(page):
-    page.goto("https://airregi.jp/CLP/view/top/")
-    page.wait_for_timeout(2000)
+    page.goto("https://airregi.jp/CLP/view/top/", wait_until="domcontentloaded")
+    page.wait_for_timeout(3000)
     
-    if "login" in page.url or page.locator("input[name='account']").is_visible() or page.get_by_role("button", name="ログイン").is_visible():
+    if "login" in page.url or page.locator("text='AirID'").first.is_visible() or page.get_by_role("button", name="ログイン").is_visible():
         print("・ログイン処理を自動実行中...")
+        
+        if not AIRREGI_ID or not AIRREGI_PASS:
+            raise ValueError("【認証エラー】AIRREGI_ID または AIRREGI_PASS が設定されていません。Streamlit Secretsをご確認ください。")
+
         if page.get_by_role("button", name="ログイン").is_visible() and "login" not in page.url:
             page.get_by_role("button", name="ログイン").click()
             page.wait_for_timeout(2000)
 
-        id_input = page.locator("input[name='account'], input[name='loginId'], input[type='text']").first
-        if id_input.is_visible():
-            id_input.fill(AIRREGI_ID.strip() if AIRREGI_ID else "")
-        
-        pass_input = page.locator("input[name='password'], input[type='password']").first
-        if pass_input.is_visible():
-            pass_input.fill(AIRREGI_PASS.strip() if AIRREGI_PASS else "")
+        id_input = None
+        selectors = [
+            "input[name='loginId']:visible",
+            "input[name='account']:visible",
+            "input[name='userId']:visible",
+            "input[placeholder*='AirID']:visible",
+            "input[placeholder*='メール']:visible",
+            "input[type='text']:visible:not([name*='dummy'])",
+            "input[type='email']:visible:not([name*='dummy'])"
+        ]
+        for sel in selectors:
+            loc = page.locator(sel).first
+            if loc.is_visible():
+                id_input = loc
+                break
 
-        login_btn = page.locator("button[type='submit'], input[type='submit'], button:has-text('ログイン')").first
+        if not id_input:
+            for inp in page.locator("input:visible").all():
+                inp_type = inp.get_attribute("type") or "text"
+                inp_name = inp.get_attribute("name") or ""
+                if inp_type in ["text", "email"] and "dummy" not in inp_name.lower():
+                    id_input = inp
+                    break
+
+        if id_input:
+            id_input.fill(AIRREGI_ID.strip())
+        else:
+            raise ValueError("AirIDの入力欄（可視要素）が見つかりませんでした。")
+        
+        pass_input = page.locator("input[type='password']:visible, input[name='password']:visible").first
+        if pass_input.is_visible():
+            pass_input.fill(AIRREGI_PASS.strip())
+        else:
+            raise ValueError("パスワードの入力欄が見つかりませんでした。")
+
+        try:
+            checkbox = page.locator("input[type='checkbox']:visible").first
+            if checkbox.is_visible() and not checkbox.is_checked():
+                checkbox.check()
+        except Exception:
+            pass
+
+        login_btn = page.locator("button[type='submit']:visible, input[type='submit']:visible, button:has-text('ログイン'):visible").first
         login_btn.click()
+        
+        print("・認証後の画面遷移を待機中...")
+        for _ in range(25):
+            page.wait_for_timeout(1000)
+
+            if "choose-store" in page.url or page.locator("text='店舗を選択'").first.is_visible() or page.locator("text='利用する店舗を選択'").first.is_visible():
+                print("・店舗選択画面（choose-store）を検知しました。対象店舗を選択して進みます...")
+                page.wait_for_timeout(1500)
+                
+                clicked = False
+                for s_name in TARGET_STORES:
+                    loc = page.locator(f"text='{s_name}'").first
+                    if loc.is_visible():
+                        loc.click()
+                        clicked = True
+                        break
+                
+                if not clicked:
+                    candidate = page.locator("a:visible, button:visible").filter(has_text="店").first
+                    if candidate.is_visible():
+                        candidate.click()
+                    else:
+                        first_store_link = page.locator("ul li a:visible, main a:visible").first
+                        if first_store_link.is_visible():
+                            first_store_link.click()
+                
+                page.wait_for_timeout(3500)
+
+            if "airregi.jp" in page.url and "connect.airregi.jp" not in page.url:
+                break
+        
+        if "connect.airregi.jp" in page.url and "choose-store" not in page.url:
+            body_text = page.locator("body").inner_text()
+            if "認証コード" in body_text or "2段階認証" in body_text:
+                raise RuntimeError("【2段階認証エラー】AirIDの2段階認証画面が表示されています。")
+            
+            error_elems = page.locator(".error, [class*='error'], [role='alert'], .attention").all_inner_texts()
+            error_details = " / ".join([e.strip() for e in error_elems if e.strip()])
+            if error_details:
+                raise RuntimeError(f"【ログインエラー】Airレジ画面のメッセージ: {error_details}")
+            
+            raise RuntimeError(f"【ログイン未完了】画面遷移が完了しませんでした。URL: {page.url}")
+
+        print(f"・Airレジへのログイン成功を確認（現在のURL: {page.url}）")
         page.wait_for_timeout(3000)
 
 def select_store(page, store_name, is_first_store=False):
@@ -113,7 +198,6 @@ def extract_sales_for_date(page, target_date):
 
     print(f"・ {target_date} ({year_str} {month_str} {day_num_str}) のデータを指定中...")
 
-    # 集計対象が「時間別」になっているか確認・変更
     try:
         page.evaluate("""() => {
             const selects = Array.from(document.querySelectorAll('select'));
@@ -130,7 +214,6 @@ def extract_sales_for_date(page, target_date):
     except Exception:
         pass
 
-    # 日付のプルダウン操作（標準selectおよびカスタム要素へのフォールバック）
     success = page.evaluate("""({ yearStr, monthStr, dayNumStr }) => {
         const selects = Array.from(document.querySelectorAll('select'));
         let changed = false;
@@ -149,14 +232,12 @@ def extract_sales_for_date(page, target_date):
 
     page.wait_for_timeout(1000)
 
-    # 「表示する」ボタンをクリック
     btn = page.locator("button:has-text('表示する'), button:has-text('表示'), input[value*='表示']").first
     if btn.is_visible():
         btn.click(force=True)
-        # 確実にテーブルが更新されるように5秒待機する
+        # --- 最小修正2: 抽出前に確実に5秒待機 ---
         page.wait_for_timeout(5000)
 
-    # テーブル行の抽出
     rows = page.locator("table tr").all()
     store_rows = []
     for row in rows:
@@ -188,7 +269,6 @@ def main():
 
     print(f"=== 対象期間: {start_date_str} 〜 {end_date_str} ({len(date_list)}日間) ===")
 
-    # クラウド判定（Cloud上では画面非表示モードに切り替え）
     is_cloud = (platform.system() == "Linux")
     run_headless = True if is_cloud else False
     
@@ -208,3 +288,47 @@ def main():
             timezone_id="Asia/Tokyo",
             locale="ja-JP",
             args=launch_args
+        )
+        page = context.new_page()
+
+        try:
+            auto_login(page)
+
+            for target_date in date_list:
+                print(f"\n--- 【処理日】 {target_date} ---")
+                all_stores_data = []
+
+                for index, store_name in enumerate(TARGET_STORES):
+                    # --- 最小修正3: 三田本店の店舗切り替えスキップを解除 ---
+                    is_first = False
+                    select_store(page, store_name, is_first_store=is_first)
+                    
+                    if index == 0 and target_date == date_list[0]:
+                        navigate_to_sales_page(page)
+                    else:
+                        try:
+                            page.locator("text='日別売上'").first.click()
+                            page.wait_for_timeout(1500)
+                        except Exception:
+                            navigate_to_sales_page(page)
+
+                    store_rows = extract_sales_for_date(page, target_date)
+                    for r in store_rows:
+                        all_stores_data.append([store_name] + r)
+
+                if all_stores_data:
+                    df = pd.DataFrame(all_stores_data)
+                    csv_path = os.path.join(OUTPUT_DIR, f"4店舗_時間別売上_{target_date}.csv")
+                    df.to_csv(csv_path, index=False, header=False, encoding="utf-8-sig")
+                    print(f"[保存完了] {csv_path}")
+                else:
+                    raise RuntimeError(f"【エラー】{target_date} のデータが抽出できませんでした。")
+
+        except Exception as e:
+            print(f"[ERROR] 処理中にエラーが発生しました: {e}")
+            raise e
+        finally:
+            context.close()
+
+if __name__ == "__main__":
+    main()
