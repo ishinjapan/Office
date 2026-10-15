@@ -11,7 +11,6 @@ from playwright.sync_api import sync_playwright
 # --- 1. Chromiumブラウザの自動インストール（未導入環境対策） ---
 def ensure_playwright_installed():
     try:
-        # クラウド環境や未インストール環境向けに自動セットアップ
         subprocess.run([sys.executable, "-m", "playwright", "install", "chromium"], check=True)
     except Exception as e:
         print(f"Playwright browser check warning: {e}")
@@ -23,7 +22,6 @@ load_dotenv()
 AIRREGI_ID = os.getenv("AIRREGI_ID")
 AIRREGI_PASS = os.getenv("AIRREGI_PASS")
 
-# Streamlit Cloud環境の場合、secretsからの読み込みも試行
 if not AIRREGI_ID or not AIRREGI_PASS:
     try:
         import streamlit as st
@@ -49,36 +47,65 @@ def auto_login(page):
     page.wait_for_timeout(3000)
     
     # ログイン画面またはログインボタンが表示されているか判定
-    if "login" in page.url or page.locator("input[name='account']").is_visible() or page.get_by_role("button", name="ログイン").is_visible():
+    if "login" in page.url or page.locator("text='AirID'").first.is_visible() or page.get_by_role("button", name="ログイン").is_visible():
         print("・ログイン画面を検知。自動ログイン処理を実行します...")
         
         if not AIRREGI_ID or not AIRREGI_PASS:
-            raise ValueError("【認証エラー】AIRREGI_ID または AIRREGI_PASS が設定されていません。環境変数またはStreamlit Secretsをご確認ください。")
+            raise ValueError("【認証エラー】AIRREGI_ID または AIRREGI_PASS が設定されていません。Streamlit Secretsをご確認ください。")
 
         if page.get_by_role("button", name="ログイン").is_visible() and "login" not in page.url:
             page.get_by_role("button", name="ログイン").click()
             page.wait_for_timeout(2000)
 
-        # ID入力
-        id_input = page.locator("input[name='account'], input[name='loginId'], input[type='text']").first
-        id_input.wait_for(state="visible", timeout=15000)
-        id_input.fill(AIRREGI_ID)
-        
-        # パスワード入力
-        pass_input = page.locator("input[name='password'], input[type='password']").first
-        pass_input.wait_for(state="visible", timeout=15000)
-        pass_input.fill(AIRREGI_PASS)
+        page.wait_for_timeout(1500)
 
-        # 「次回から入力を省略」にチェックを入れる
+        # ID入力欄（非表示ダミー dummy01 をスキップし、画面に表示されている入力枠を特定）
+        id_input = None
+        selectors = [
+            "input[name='loginId']:visible",
+            "input[name='account']:visible",
+            "input[name='userId']:visible",
+            "input[placeholder*='AirID']:visible",
+            "input[placeholder*='メール']:visible",
+            "input[type='text']:visible:not([name*='dummy'])",
+            "input[type='email']:visible:not([name*='dummy'])"
+        ]
+        for sel in selectors:
+            loc = page.locator(sel).first
+            if loc.is_visible():
+                id_input = loc
+                break
+
+        if not id_input:
+            for inp in page.locator("input:visible").all():
+                inp_type = inp.get_attribute("type") or "text"
+                inp_name = inp.get_attribute("name") or ""
+                if inp_type in ["text", "email"] and "dummy" not in inp_name.lower():
+                    id_input = inp
+                    break
+
+        if id_input:
+            id_input.fill(AIRREGI_ID)
+        else:
+            raise ValueError("AirIDの入力欄（可視要素）が見つかりませんでした。")
+        
+        # パスワード入力欄
+        pass_input = page.locator("input[type='password']:visible, input[name='password']:visible").first
+        if pass_input.is_visible():
+            pass_input.fill(AIRREGI_PASS)
+        else:
+            raise ValueError("パスワードの入力欄が見つかりませんでした。")
+
+        # 「次回から入力を省略」にチェック
         try:
-            checkbox = page.locator("input[type='checkbox']").first
+            checkbox = page.locator("input[type='checkbox']:visible").first
             if checkbox.is_visible() and not checkbox.is_checked():
                 checkbox.check()
         except Exception:
             pass
 
         # ログインボタン押下
-        login_btn = page.locator("button[type='submit'], input[type='submit'], button:has-text('ログイン')").first
+        login_btn = page.locator("button[type='submit']:visible, input[type='submit']:visible, button:has-text('ログイン'):visible").first
         login_btn.click()
         page.wait_for_timeout(5000)
 
